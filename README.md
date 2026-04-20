@@ -2,7 +2,7 @@
 
 `keysmith` is a small native macOS menu bar app for Linux-style hotkey workflows.
 
-It is aimed at the "I want a few tiling-window-manager habits on macOS without adopting a full replacement desktop stack" use case.
+It loads global hotkeys from a config file, launches apps, and moves the focused window between desktops.
 
 Current behavior:
 
@@ -49,7 +49,10 @@ You can change Mission Control desktop shortcuts in:
 The first launch creates this config automatically:
 
 ```ini
-bind = cmd+enter, launch, com.mitchellh.ghostty
+# Example app launch bindings:
+# bind = cmd+enter, launch, Terminal
+# bind = cmd+shift+enter, shell, open -na Terminal
+
 bind = shift+cmd+1, move-window-to-space, 1
 bind = shift+cmd+2, move-window-to-space, 2
 bind = shift+cmd+3, move-window-to-space, 3
@@ -64,6 +67,8 @@ bind = shift+cmd+10, move-window-to-space, 10
 
 `shift+cmd+10` maps to the physical `0` key.
 
+For these bindings to work, macOS Mission Control desktop shortcuts should be mapped to `cmd+1` through `cmd+0` in `System Settings > Keyboard > Keyboard Shortcuts > Mission Control`.
+
 ## Config Format
 
 One binding per line:
@@ -75,12 +80,14 @@ bind = modifiers+key, action, argument
 Supported actions:
 
 - `launch`
+- `shell`
 - `move-window-to-space`
 
 Examples:
 
 ```ini
-bind = cmd+enter, launch, com.mitchellh.ghostty
+bind = cmd+enter, launch, Terminal
+bind = cmd+shift+enter, shell, open -na Terminal
 bind = cmd+b, launch, Safari
 bind = shift+cmd+4, move-window-to-space, 4
 ```
@@ -102,9 +109,15 @@ The default config path is:
 ~/.config/keysmith/keysmith.conf
 ```
 
+The `shell` action runs its argument through `/bin/sh -lc`, which is useful for commands like:
+
+```ini
+bind = cmd+shift+enter, shell, open -na Terminal
+```
+
 ## Running
 
-Open the package in Xcode and run the `keysmith` executable target, or build from the terminal:
+Build and run from the terminal:
 
 ```bash
 swift build

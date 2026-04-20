@@ -9,6 +9,7 @@ final class AppController: NSObject {
     private let configurationWatcher = ConfigurationWatcher()
     private let hotKeyManager = HotKeyManager()
     private let launcher = AppLauncher()
+    private let shellCommandRunner = ShellCommandRunner()
     private let focusedWindowManager = FocusedWindowManager()
     private let spaceManager = SpaceManager()
     private let windowDragSpaceMover = WindowDragSpaceMover()
@@ -145,6 +146,16 @@ final class AppController: NSObject {
             } catch {
                 logger.error("Launch action failed: \(error.localizedDescription, privacy: .public)")
                 logEvent("Launch action failed: \(error.localizedDescription)")
+            }
+
+        case let .shell(command):
+            do {
+                logEvent("Running shell command: \(command)")
+                try shellCommandRunner.run(command)
+                logEvent("Shell command started successfully")
+            } catch {
+                logger.error("Shell action failed: \(error.localizedDescription, privacy: .public)")
+                logEvent("Shell action failed: \(error.localizedDescription)")
             }
 
         case let .moveWindowToSpace(target):

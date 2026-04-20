@@ -13,6 +13,7 @@ struct ConfiguredBinding: Equatable {
 
 enum BindingAction: Equatable {
     case launch(String)
+    case shell(String)
     case moveWindowToSpace(Int)
 }
 
@@ -21,6 +22,8 @@ extension BindingAction: CustomStringConvertible {
         switch self {
         case let .launch(target):
             return "launch(\(target))"
+        case let .shell(command):
+            return "shell(\(command))"
         case let .moveWindowToSpace(index):
             return "move-window-to-space(\(index))"
         }
@@ -207,12 +210,16 @@ struct ConfigurationStore {
         #
         # Actions:
         # launch                -> app name, bundle identifier, or app path
+        # shell                 -> shell command
         # move-window-to-space  -> desktop number on the current display
         #
         # Note:
         # shift+cmd+10 maps to the physical 0 key.
 
-        bind = cmd+enter, launch, com.mitchellh.ghostty
+        # Example app launch bindings:
+        # bind = cmd+enter, launch, Terminal
+        # bind = cmd+shift+enter, shell, open -na Terminal
+
         bind = shift+cmd+1, move-window-to-space, 1
         bind = shift+cmd+2, move-window-to-space, 2
         bind = shift+cmd+3, move-window-to-space, 3
@@ -276,6 +283,8 @@ struct ConfigurationParser {
         switch actionName {
         case "launch":
             action = .launch(argument)
+        case "shell":
+            action = .shell(argument)
         case "move-window-to-space":
             guard let targetSpace = Int(argument), targetSpace > 0 else {
                 throw ConfigurationError.invalidActionArgument(actionName, argument)
