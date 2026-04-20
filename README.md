@@ -111,6 +111,36 @@ swift build
 swift run
 ```
 
+You do not need an Xcode project to use or package this app.
+
+## Building A macOS App Bundle
+
+Build a standalone `.app` bundle from the Swift package:
+
+```bash
+scripts/build_app.sh
+```
+
+That produces:
+
+```text
+.build/app/Keysmith.app
+```
+
+Install it into `/Applications`:
+
+```bash
+scripts/install_app.sh
+```
+
+Launch the installed app:
+
+```bash
+scripts/open_app.sh
+```
+
+The generated app bundle is a menu bar app with `LSUIElement` enabled, so it stays out of the Dock and app switcher.
+
 ## Caveats
 
 - `move-window-to-space` requires Accessibility permission because the app needs the focused window ID and posts synthetic input events.
