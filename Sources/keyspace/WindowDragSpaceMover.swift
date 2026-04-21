@@ -5,8 +5,15 @@ import Foundation
 @MainActor
 final class WindowDragSpaceMover {
     private let eventSource = CGEventSource(stateID: .hidSystemState)
+    private let titleBarGrabInset: CGFloat = 4
 
-    func move(window: FocusedWindowContext, toDesktop target: Int, log: ((String) -> Void)? = nil) throws {
+    func move(
+        window: FocusedWindowContext,
+        toDesktop target: Int,
+        shortcutModifiers: CGEventFlags = .maskCommand,
+        shortcutDescription: String? = nil,
+        log: ((String) -> Void)? = nil
+    ) throws {
         guard target > 0 else {
             throw WindowDragSpaceMoverError.invalidDesktop(target)
         }
@@ -18,7 +25,7 @@ final class WindowDragSpaceMover {
         let originalMouseLocation = currentMouseLocation()
         let titleBarPoint = CGPoint(
             x: window.frame.midX,
-            y: min(window.frame.minY + 6, window.frame.maxY - 2)
+            y: min(window.frame.minY + titleBarGrabInset, window.frame.maxY - 2)
         )
 
         log?("Drag move using title bar point \(titleBarPoint.debugSummary)")
@@ -33,8 +40,9 @@ final class WindowDragSpaceMover {
         postMouseEvent(.leftMouseDragged, at: dragPoint, source: eventSource)
         sleep(milliseconds: 80)
 
-        try postDesktopShortcut(for: target, source: eventSource)
-        log?("Posted desktop switch shortcut cmd+\(target == 10 ? "0" : "\(target)")")
+        let shortcutLabel = shortcutDescription ?? shortcutLabel(for: target, modifiers: shortcutModifiers)
+        try postDesktopShortcut(for: target, modifiers: shortcutModifiers, source: eventSource)
+        log?("Posted desktop switch shortcut \(shortcutLabel)")
         sleep(milliseconds: 450)
 
         postMouseEvent(.leftMouseUp, at: currentMouseLocation(), source: eventSource)
@@ -42,7 +50,7 @@ final class WindowDragSpaceMover {
         moveMouse(to: originalMouseLocation, source: eventSource)
     }
 
-    private func postDesktopShortcut(for target: Int, source: CGEventSource) throws {
+    private func postDesktopShortcut(for target: Int, modifiers: CGEventFlags, source: CGEventSource) throws {
         let key: String
         switch target {
         case 10:
@@ -51,11 +59,31 @@ final class WindowDragSpaceMover {
             key = "\(target)"
         }
 
-        let keyCode = try KeyCombo.parse("cmd+\(key)").keyCode
+        let keyCode = try KeyCombo.parse(key).keyCode
 
-        postKeyEvent(keyCode: CGKeyCode(keyCode), keyDown: true, source: source, flags: .maskCommand)
+        postKeyEvent(keyCode: CGKeyCode(keyCode), keyDown: true, source: source, flags: modifiers)
         sleep(milliseconds: 20)
-        postKeyEvent(keyCode: CGKeyCode(keyCode), keyDown: false, source: source, flags: .maskCommand)
+        postKeyEvent(keyCode: CGKeyCode(keyCode), keyDown: false, source: source, flags: modifiers)
+    }
+
+    private func shortcutLabel(for target: Int, modifiers: CGEventFlags) -> String {
+        var parts: [String] = []
+
+        if modifiers.contains(.maskCommand) {
+            parts.append("cmd")
+        }
+        if modifiers.contains(.maskAlternate) {
+            parts.append("opt")
+        }
+        if modifiers.contains(.maskShift) {
+            parts.append("shift")
+        }
+        if modifiers.contains(.maskControl) {
+            parts.append("ctrl")
+        }
+
+        parts.append(target == 10 ? "0" : "\(target)")
+        return parts.joined(separator: "+")
     }
 
     private func currentMouseLocation() -> CGPoint {

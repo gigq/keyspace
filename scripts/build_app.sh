@@ -2,9 +2,9 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-APP_NAME="Keysmith"
-EXECUTABLE_NAME="keysmith"
-BUNDLE_ID="com.gigq.keysmith"
+APP_NAME="Keyspace"
+EXECUTABLE_NAME="keyspace"
+BUNDLE_ID="com.gigq.keyspace"
 BUILD_DIR="$ROOT_DIR/.build/app"
 APP_DIR="$BUILD_DIR/$APP_NAME.app"
 CONTENTS_DIR="$APP_DIR/Contents"

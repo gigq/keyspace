@@ -2,7 +2,7 @@ import AppKit
 import Carbon
 import Foundation
 
-struct KeysmithConfiguration: Equatable {
+struct KeyspaceConfiguration: Equatable {
     let bindings: [ConfiguredBinding]
 }
 
@@ -15,6 +15,7 @@ enum BindingAction: Equatable {
     case launch(String)
     case shell(String)
     case moveWindowToSpace(Int)
+    case moveWindowToSecondarySpace(Int)
 }
 
 extension BindingAction: CustomStringConvertible {
@@ -26,6 +27,8 @@ extension BindingAction: CustomStringConvertible {
             return "shell(\(command))"
         case let .moveWindowToSpace(index):
             return "move-window-to-space(\(index))"
+        case let .moveWindowToSecondarySpace(index):
+            return "move-window-to-secondary-space(\(index))"
         }
     }
 }
@@ -178,10 +181,16 @@ struct ConfigurationStore {
     let configURL: URL
 
     init(environment: [String: String] = ProcessInfo.processInfo.environment) {
-        if let overridePath = environment["KEYSMITH_CONFIG"], !overridePath.isEmpty {
+        if let overridePath = environment["KEYSPACE_CONFIG"], !overridePath.isEmpty {
+            configURL = URL(fileURLWithPath: NSString(string: overridePath).expandingTildeInPath)
+        } else if let overridePath = environment["KEYSMITH_CONFIG"], !overridePath.isEmpty {
             configURL = URL(fileURLWithPath: NSString(string: overridePath).expandingTildeInPath)
         } else {
-            configURL = URL(fileURLWithPath: NSString(string: "~/.config/keysmith/keysmith.conf").expandingTildeInPath)
+            let preferredURL = URL(fileURLWithPath: NSString(string: "~/.config/keyspace/keyspace.conf").expandingTildeInPath)
+            let legacyURL = URL(fileURLWithPath: NSString(string: "~/.config/keysmith/keysmith.conf").expandingTildeInPath)
+            configURL = FileManager.default.fileExists(atPath: legacyURL.path) && !FileManager.default.fileExists(atPath: preferredURL.path)
+                ? legacyURL
+                : preferredURL
         }
     }
 
@@ -196,22 +205,23 @@ struct ConfigurationStore {
         try defaultConfig.write(to: configURL, atomically: true, encoding: .utf8)
     }
 
-    func load() throws -> KeysmithConfiguration {
+    func load() throws -> KeyspaceConfiguration {
         let rawConfig = try String(contentsOf: configURL, encoding: .utf8)
         return try ConfigurationParser().parse(rawConfig)
     }
 
     private var defaultConfig: String {
         """
-        # Keysmith config
+        # Keyspace config
         #
         # Syntax:
         # bind = modifiers+key, action, argument
         #
         # Actions:
-        # launch                -> app name, bundle identifier, or app path
-        # shell                 -> shell command
-        # move-window-to-space  -> desktop number on the current display
+        # launch                          -> app name, bundle identifier, or app path
+        # shell                           -> shell command
+        # move-window-to-space            -> desktop number on the current display
+        # move-window-to-secondary-space  -> desktop number on the secondary display
         #
         # Note:
         # shift+cmd+10 maps to the physical 0 key.
@@ -230,12 +240,23 @@ struct ConfigurationStore {
         bind = shift+cmd+8, move-window-to-space, 8
         bind = shift+cmd+9, move-window-to-space, 9
         bind = shift+cmd+10, move-window-to-space, 10
+
+        bind = shift+cmd+option+1, move-window-to-secondary-space, 1
+        bind = shift+cmd+option+2, move-window-to-secondary-space, 2
+        bind = shift+cmd+option+3, move-window-to-secondary-space, 3
+        bind = shift+cmd+option+4, move-window-to-secondary-space, 4
+        bind = shift+cmd+option+5, move-window-to-secondary-space, 5
+        bind = shift+cmd+option+6, move-window-to-secondary-space, 6
+        bind = shift+cmd+option+7, move-window-to-secondary-space, 7
+        bind = shift+cmd+option+8, move-window-to-secondary-space, 8
+        bind = shift+cmd+option+9, move-window-to-secondary-space, 9
+        bind = shift+cmd+option+10, move-window-to-secondary-space, 10
         """
     }
 }
 
 struct ConfigurationParser {
-    func parse(_ rawConfig: String) throws -> KeysmithConfiguration {
+    func parse(_ rawConfig: String) throws -> KeyspaceConfiguration {
         let lines = rawConfig.components(separatedBy: .newlines)
         var bindings: [ConfiguredBinding] = []
 
@@ -253,7 +274,7 @@ struct ConfigurationParser {
             }
         }
 
-        return KeysmithConfiguration(bindings: bindings)
+        return KeyspaceConfiguration(bindings: bindings)
     }
 
     private func parseBinding(_ line: String) throws -> ConfiguredBinding {
@@ -290,6 +311,11 @@ struct ConfigurationParser {
                 throw ConfigurationError.invalidActionArgument(actionName, argument)
             }
             action = .moveWindowToSpace(targetSpace)
+        case "move-window-to-secondary-space":
+            guard let targetSpace = Int(argument), targetSpace > 0 else {
+                throw ConfigurationError.invalidActionArgument(actionName, argument)
+            }
+            action = .moveWindowToSecondarySpace(targetSpace)
         default:
             throw ConfigurationError.invalidAction(actionName)
         }

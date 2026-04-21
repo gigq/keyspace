@@ -4,7 +4,7 @@ import OSLog
 
 @MainActor
 final class AppController: NSObject {
-    private let logger = Logger(subsystem: "keysmith", category: "app")
+    private let logger = Logger(subsystem: "keyspace", category: "app")
     private let configurationStore = ConfigurationStore()
     private let configurationWatcher = ConfigurationWatcher()
     private let hotKeyManager = HotKeyManager()
@@ -78,7 +78,7 @@ final class AppController: NSObject {
 
         menu.addItem(.separator())
 
-        let quitItem = NSMenuItem(title: "Quit Keysmith", action: #selector(quit), keyEquivalent: "q")
+        let quitItem = NSMenuItem(title: "Quit Keyspace", action: #selector(quit), keyEquivalent: "q")
         quitItem.target = self
         menu.addItem(quitItem)
 
@@ -159,26 +159,52 @@ final class AppController: NSObject {
             }
 
         case let .moveWindowToSpace(target):
-            logEvent("Preparing to move focused window to desktop \(target)")
-            guard ensureAccessibilityPermission(promptIfMissing: true) else {
-                logger.error("Accessibility permission is required to move windows between spaces")
-                refreshMenuState()
-                logEvent("Move aborted: missing Accessibility permission")
-                return
-            }
+            moveFocusedWindow(
+                toDesktop: target,
+                targetDescription: "desktop \(target) on the current display",
+                shortcutModifiers: .maskCommand,
+                shortcutDescription: "cmd+\(target == 10 ? "0" : "\(target)")"
+            )
+        case let .moveWindowToSecondarySpace(target):
+            moveFocusedWindow(
+                toDesktop: target,
+                targetDescription: "desktop \(target) on the secondary display",
+                shortcutModifiers: [.maskCommand, .maskAlternate],
+                shortcutDescription: "cmd+opt+\(target == 10 ? "0" : "\(target)")"
+            )
+        }
+    }
 
-            do {
-                let focusedWindow = try focusedWindowManager.focusedWindowContext()
-                logEvent("Focused window id=\(focusedWindow.windowID) pid=\(focusedWindow.processID) title=\(focusedWindow.title ?? "<nil>") frame=\(focusedWindow.frame.debugSummary)")
-                try windowDragSpaceMover.move(window: focusedWindow, toDesktop: target) { [weak self] message in
-                    self?.logEvent(message)
-                }
-                logEvent("Move request completed for window \(focusedWindow.windowID) to desktop \(target)")
-                updateStatusItem()
-            } catch {
-                logger.error("Move window action failed: \(error.localizedDescription, privacy: .public)")
-                logEvent("Move window action failed: \(error.localizedDescription)")
+    private func moveFocusedWindow(
+        toDesktop target: Int,
+        targetDescription: String,
+        shortcutModifiers: CGEventFlags,
+        shortcutDescription: String
+    ) {
+        logEvent("Preparing to move focused window to \(targetDescription)")
+        guard ensureAccessibilityPermission(promptIfMissing: true) else {
+            logger.error("Accessibility permission is required to move windows between spaces")
+            refreshMenuState()
+            logEvent("Move aborted: missing Accessibility permission")
+            return
+        }
+
+        do {
+            let focusedWindow = try focusedWindowManager.focusedWindowContext()
+            logEvent("Focused window id=\(focusedWindow.windowID) pid=\(focusedWindow.processID) title=\(focusedWindow.title ?? "<nil>") frame=\(focusedWindow.frame.debugSummary)")
+            try windowDragSpaceMover.move(
+                window: focusedWindow,
+                toDesktop: target,
+                shortcutModifiers: shortcutModifiers,
+                shortcutDescription: shortcutDescription
+            ) { [weak self] message in
+                self?.logEvent(message)
             }
+            logEvent("Move request completed for window \(focusedWindow.windowID) to \(targetDescription)")
+            updateStatusItem()
+        } catch {
+            logger.error("Move window action failed: \(error.localizedDescription, privacy: .public)")
+            logEvent("Move window action failed: \(error.localizedDescription)")
         }
     }
 

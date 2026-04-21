@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-APP_PATH="/Applications/Keysmith.app"
+APP_PATH="/Applications/Keyspace.app"
 
 if [[ ! -d "$APP_PATH" ]]; then
   echo "Installed app bundle not found:"

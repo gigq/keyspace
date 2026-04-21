@@ -4,17 +4,17 @@
 import PackageDescription
 
 let package = Package(
-    name: "keysmith",
+    name: "keyspace",
     platforms: [
         .macOS(.v14),
     ],
     targets: [
         .executableTarget(
-            name: "keysmith"
+            name: "keyspace"
         ),
         .testTarget(
-            name: "keysmithTests",
-            dependencies: ["keysmith"]
+            name: "keyspaceTests",
+            dependencies: ["keyspace"]
         ),
     ],
     swiftLanguageModes: [.v6]

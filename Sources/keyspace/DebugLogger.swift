@@ -3,14 +3,20 @@ import Foundation
 final class DebugLogger {
     let logURL: URL
 
-    private let queue = DispatchQueue(label: "keysmith.debug-log")
+    private let queue = DispatchQueue(label: "keyspace.debug-log")
     private let formatter = ISO8601DateFormatter()
 
     init(environment: [String: String] = ProcessInfo.processInfo.environment) {
-        if let overridePath = environment["KEYSMITH_LOG"], !overridePath.isEmpty {
+        if let overridePath = environment["KEYSPACE_LOG"], !overridePath.isEmpty {
+            logURL = URL(fileURLWithPath: NSString(string: overridePath).expandingTildeInPath)
+        } else if let overridePath = environment["KEYSMITH_LOG"], !overridePath.isEmpty {
             logURL = URL(fileURLWithPath: NSString(string: overridePath).expandingTildeInPath)
         } else {
-            logURL = URL(fileURLWithPath: NSString(string: "~/Library/Logs/keysmith.log").expandingTildeInPath)
+            let preferredURL = URL(fileURLWithPath: NSString(string: "~/Library/Logs/keyspace.log").expandingTildeInPath)
+            let legacyURL = URL(fileURLWithPath: NSString(string: "~/Library/Logs/keysmith.log").expandingTildeInPath)
+            logURL = FileManager.default.fileExists(atPath: legacyURL.path) && !FileManager.default.fileExists(atPath: preferredURL.path)
+                ? legacyURL
+                : preferredURL
         }
     }
 
