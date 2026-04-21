@@ -39,6 +39,22 @@ Window moves can target either the current display or the secondary display, dep
 
 It does not replace Finder, Dock, or Mission Control. It layers on top of macOS and tries to make workspace movement feel closer to a Hyprland-style setup using the mechanisms macOS actually gives us.
 
+It is also not trying to compete directly with tools like:
+
+- [`yabai`](https://github.com/asmvik/yabai), a tiling window manager that controls windows, spaces, and displays much more broadly
+- [`AeroSpace`](https://github.com/nikitabobko/AeroSpace), an i3-like tiling window manager that explicitly emulates its own virtual workspaces instead of relying on native macOS Spaces
+
+Those tools are significantly more capable than `keyspace`, but they are solving a larger problem. The goal here is narrower:
+
+- stay close to native Mission Control desktops
+- keep the mental model simple and explicit
+- avoid replacing the macOS window manager
+- provide a minimal, config-driven layer for numbered workspace workflows
+
+This project exists because I wanted the part of that experience that matters most to me, especially keyboard-driven workspace movement, without adopting a full alternate window management model. In practice, that means deliberately using macOS Spaces instead of inventing a parallel workspace system, and keeping the implementation as small and predictable as possible.
+
+I also wanted something that does not require disabling System Integrity Protection. That tradeoff matters here: `keyspace` is intentionally narrower than `yabai`, but the goal is to stay inside a setup that is easier to install, easier to keep running, and less likely to break across normal macOS updates.
+
 ## How Window Moves Work
 
 macOS does not expose a stable public API for "move the focused window to desktop N".
