@@ -13,7 +13,6 @@ LEGACY_APP="$TARGET_DIR/Keysmith.app"
 rm -rf "$LEGACY_APP"
 rm -rf "$TARGET_APP"
 cp -R "$SOURCE_APP" "$TARGET_APP"
-codesign --force --sign - "$TARGET_APP" >/dev/null 2>&1 || true
 
 echo "Installed app bundle to:"
 echo "  $TARGET_APP"

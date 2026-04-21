@@ -10,16 +10,17 @@ The reference point for this project is Hyprland's workspace model and the way i
 
 If you already think in terms of "workspace 1 on this monitor", "move the focused window to workspace 4", and "keep the active workspace state visible", this app is trying to make that feel natural on macOS.
 
-Today, `keyspace` loads global hotkeys from a config file, launches apps, and moves the focused window between numbered desktops.
+Today, `keyspace` loads global bindings from a config file, launches apps, moves the focused window between numbered desktops, and can retile the focused display into a master-stack layout on demand.
 
 Current behavior:
 
 - loads bindings from `~/.config/keyspace/keyspace.conf`
 - stays in the menu bar
 - shows the current desktop number for each display in the menu bar
-- registers global hotkeys
+- registers global keyboard and mouse-button bindings
 - launches apps from config
 - moves the focused window to desktop `N`
+- tiles the focused display into a manual master layout when requested
 
 On multi-display setups, the menu bar label shows one desktop number per display, ordered left to right, for example `2|11`.
 Window moves can target either the current display or the secondary display, depending on which action you bind.
@@ -30,14 +31,13 @@ Window moves can target either the current display or the secondary display, dep
 
 - numbered desktops that matter
 - predictable hotkeys for moving work between desktops
+- a manual master-stack tiling action for the current display
 - per-display desktop awareness in the menu bar
 - a plain-text config instead of a full desktop environment
 
 ## What This Is Not
 
-`keyspace` is not a compositor, tiling window manager, or full Hyprland clone.
-
-It does not replace Finder, Dock, or Mission Control. It layers on top of macOS and tries to make workspace movement feel closer to a Hyprland-style setup using the mechanisms macOS actually gives us.
+`keyspace` does not replace Finder, Dock, or Mission Control. It layers on top of macOS and tries to make workspace movement and manual retile operations feel closer to a Hyprland-style setup using the mechanisms macOS actually gives us.
 
 It is also not trying to compete directly with tools like:
 
@@ -50,10 +50,23 @@ Those tools are significantly more capable than `keyspace`, but they are solving
 - keep the mental model simple and explicit
 - avoid replacing the macOS window manager
 - provide a minimal, config-driven layer for numbered workspace workflows
+- make tiling an explicit action, not an always-on layout daemon
 
-This project exists because I wanted the part of that experience that matters most to me, especially keyboard-driven workspace movement, without adopting a full alternate window management model. In practice, that means deliberately using macOS Spaces instead of inventing a parallel workspace system, and keeping the implementation as small and predictable as possible.
+This project exists because I wanted the part of that experience that matters most to me, especially keyboard-driven workspace movement and quick manual retile actions, without adopting a full alternate window management model. In practice, that means deliberately using macOS Spaces instead of inventing a parallel workspace system, and keeping the implementation as small and predictable as possible.
 
 I also wanted something that does not require disabling System Integrity Protection. That tradeoff matters here: `keyspace` is intentionally narrower than `yabai`, but the goal is to stay inside a setup that is easier to install, easier to keep running, and less likely to break across normal macOS updates.
+
+## How Tiling Works
+
+`keyspace` now supports a Hyprland-style master layout for the focused display:
+
+- the focused window becomes the master pane on the left
+- other supported windows on that display stack vertically on the right
+- running the action again with a different focused window promotes that window to master
+
+This tiling mode is intentionally manual. `keyspace` only retiles when you press a bound key or mouse button. It does not continuously watch every new window and it does not try to enforce a permanent layout in the background.
+
+That is a deliberate design choice. The goal is to keep the behavior flexible and predictable on macOS, avoid the constant resize churn that more aggressive tiling managers can introduce, and let you decide exactly when the current display should be rearranged.
 
 ## How Window Moves Work
 
@@ -96,6 +109,8 @@ The first launch creates this config automatically. It reflects the current defa
 # Example app launch bindings:
 # bind = cmd+enter, launch, Terminal
 # bind = cmd+shift+enter, shell, open -na Terminal
+# bind = shift+cmd+t, tile-current-display-master
+# bind = mouse-4, tile-current-display-master
 
 bind = shift+cmd+1, move-window-to-space, 1
 bind = shift+cmd+2, move-window-to-space, 2
@@ -130,6 +145,7 @@ One binding per line:
 
 ```ini
 bind = modifiers+key, action, argument
+bind = modifiers+mouse-N, action, argument
 ```
 
 Supported actions:
@@ -138,6 +154,7 @@ Supported actions:
 - `shell`
 - `move-window-to-space`
 - `move-window-to-secondary-space`
+- `tile-current-display-master`
 
 Examples:
 
@@ -147,6 +164,8 @@ bind = cmd+shift+enter, shell, open -na Terminal
 bind = cmd+b, launch, Safari
 bind = shift+cmd+4, move-window-to-space, 4
 bind = shift+cmd+option+4, move-window-to-secondary-space, 4
+bind = shift+cmd+t, tile-current-display-master
+bind = mouse-4, tile-current-display-master
 ```
 
 Supported modifier aliases:
@@ -173,6 +192,14 @@ The `shell` action runs its argument through `/bin/sh -lc`, which is useful for 
 ```ini
 bind = cmd+shift+enter, shell, open -na Terminal
 ```
+
+Mouse trigger notes:
+
+- `mouse-1` = left button
+- `mouse-2` = right button
+- `mouse-3` = middle button
+- `mouse-4` and higher = extra mouse buttons
+- modifiers work with mouse buttons too, for example `shift+mouse-4`
 
 ## Running
 
@@ -219,6 +246,8 @@ The generated app bundle is a menu bar app with `LSUIElement` enabled, so it sta
 
 - `move-window-to-space` requires Accessibility permission because the app needs the focused window ID and posts synthetic input events.
 - `move-window-to-secondary-space` uses the same drag-based move flow, but triggers the secondary-display Mission Control shortcut (`cmd+opt+N`) while the window is in transit.
+- `tile-current-display-master` is intentionally manual. It does not automatically tile or retile windows when apps open, close, or change focus.
+- The tiling action only manages the focused display and skips some window types that are risky to resize continuously.
 - Desktop tracking still uses private macOS space APIs for the menu bar numbers.
 - Window moves assume a normal draggable title bar.
 - This is a local power-user tool, not an App Store-style distribution target.
