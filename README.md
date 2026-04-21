@@ -10,7 +10,7 @@ The reference point for this project is Hyprland's workspace model and the way i
 
 If you already think in terms of "workspace 1 on this monitor", "move the focused window to workspace 4", and "keep the active workspace state visible", this app is trying to make that feel natural on macOS.
 
-Today, `keyspace` loads global bindings from a config file, launches apps, moves the focused window between numbered desktops, and can retile the focused display into a master-stack layout on demand.
+Today, `keyspace` loads global bindings from a config file, launches apps, moves the focused window between numbered desktops, switches desktops, and can retile the focused display into a master-stack layout on demand.
 
 Current behavior:
 
@@ -20,6 +20,7 @@ Current behavior:
 - registers global keyboard and mouse-button bindings
 - launches apps from config
 - moves the focused window to desktop `N`
+- switches desktops with bound keys, mouse buttons, or horizontal scroll input
 - tiles the focused display into a manual master layout when requested
 
 On multi-display setups, the menu bar label shows one desktop number per display, ordered left to right, for example `2|11`.
@@ -31,6 +32,7 @@ Window moves can target either the current display or the secondary display, dep
 
 - numbered desktops that matter
 - predictable hotkeys for moving work between desktops
+- optional side-wheel or horizontal-scroll bindings for switching desktops
 - a manual master-stack tiling action for the current display
 - per-display desktop awareness in the menu bar
 - a plain-text config instead of a full desktop environment
@@ -81,6 +83,20 @@ macOS does not expose a stable public API for "move the focused window to deskto
 
 That means this app works best when your setup already supports the manual gesture.
 
+## How Space Switching Works
+
+`keyspace` can also switch desktops directly without moving a window.
+
+You can bind that to:
+
+- a keyboard shortcut
+- a mouse button
+- horizontal scroll input such as the MX Master side wheel
+
+Space switching is still explicit. One trigger produces one desktop change, then `keyspace` waits through a short cooldown before it accepts another scroll-based switch. That is intentional so one wheel gesture does not queue several Mission Control transitions at once.
+
+The app uses the Mission Control left/right shortcut currently configured in macOS, rather than assuming a fixed hardcoded key combination.
+
 ## Prerequisites
 
 The current built-in move workflow assumes these are true:
@@ -111,6 +127,8 @@ The first launch creates this config automatically. It reflects the current defa
 # bind = cmd+shift+enter, shell, open -na Terminal
 # bind = shift+cmd+t, tile-current-display-master
 # bind = mouse-4, tile-current-display-master
+# bind = scroll-left, switch-space-left
+# bind = scroll-right, switch-space-right
 
 bind = shift+cmd+1, move-window-to-space, 1
 bind = shift+cmd+2, move-window-to-space, 2
@@ -146,6 +164,8 @@ One binding per line:
 ```ini
 bind = modifiers+key, action, argument
 bind = modifiers+mouse-N, action, argument
+bind = modifiers+scroll-left, action
+bind = modifiers+scroll-right, action
 ```
 
 Supported actions:
@@ -154,6 +174,8 @@ Supported actions:
 - `shell`
 - `move-window-to-space`
 - `move-window-to-secondary-space`
+- `switch-space-left`
+- `switch-space-right`
 - `tile-current-display-master`
 
 Examples:
@@ -164,6 +186,8 @@ bind = cmd+shift+enter, shell, open -na Terminal
 bind = cmd+b, launch, Safari
 bind = shift+cmd+4, move-window-to-space, 4
 bind = shift+cmd+option+4, move-window-to-secondary-space, 4
+bind = scroll-left, switch-space-left
+bind = scroll-right, switch-space-right
 bind = shift+cmd+t, tile-current-display-master
 bind = mouse-4, tile-current-display-master
 ```
@@ -200,6 +224,12 @@ Mouse trigger notes:
 - `mouse-3` = middle button
 - `mouse-4` and higher = extra mouse buttons
 - modifiers work with mouse buttons too, for example `shift+mouse-4`
+
+Scroll trigger notes:
+
+- `scroll-left` and `scroll-right` are for horizontal scroll input
+- these are a good fit for devices like the MX Master side wheel
+- the top vertical wheel is unaffected unless your mouse software remaps it to horizontal scroll
 
 ## Running
 
@@ -246,6 +276,8 @@ The generated app bundle is a menu bar app with `LSUIElement` enabled, so it sta
 
 - `move-window-to-space` requires Accessibility permission because the app needs the focused window ID and posts synthetic input events.
 - `move-window-to-secondary-space` uses the same drag-based move flow, but triggers the secondary-display Mission Control shortcut (`cmd+opt+N`) while the window is in transit.
+- `switch-space-left` and `switch-space-right` use the Mission Control left/right shortcut configured in macOS.
+- scroll-based space switching intentionally uses a cooldown so one wheel gesture does not skip across multiple desktops.
 - `tile-current-display-master` is intentionally manual. It does not automatically tile or retile windows when apps open, close, or change focus.
 - The tiling action only manages the focused display and skips some window types that are risky to resize continuously.
 - Desktop tracking still uses private macOS space APIs for the menu bar numbers.

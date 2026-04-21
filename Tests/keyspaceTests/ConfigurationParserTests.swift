@@ -12,10 +12,12 @@ func parsesDefaultStyleBindings() throws {
         bind = shift+cmd+option+3, move-window-to-secondary-space, 3
         bind = shift+cmd+t, tile-current-display-master
         bind = mouse-4, tile-current-display-master
+        bind = scroll-left, switch-space-left
+        bind = scroll-right, switch-space-right
         """
     )
 
-    #expect(configuration.bindings.count == 5)
+    #expect(configuration.bindings.count == 7)
     #expect(configuration.bindings[0].action == .launch("com.mitchellh.ghostty"))
     #expect(configuration.bindings[1].action == .moveWindowToSpace(10))
     if case let .key(keyCombo) = configuration.bindings[1].trigger {
@@ -35,6 +37,18 @@ func parsesDefaultStyleBindings() throws {
         #expect(mouseTrigger.rawValue == "mouse-4")
     } else {
         Issue.record("Expected a mouse trigger for the mouse4 binding")
+    }
+    #expect(configuration.bindings[5].action == .switchSpaceLeft)
+    if case let .scroll(scrollTrigger) = configuration.bindings[5].trigger {
+        #expect(scrollTrigger.direction == .left)
+    } else {
+        Issue.record("Expected a scroll trigger for the scroll-left binding")
+    }
+    #expect(configuration.bindings[6].action == .switchSpaceRight)
+    if case let .scroll(scrollTrigger) = configuration.bindings[6].trigger {
+        #expect(scrollTrigger.direction == .right)
+    } else {
+        Issue.record("Expected a scroll trigger for the scroll-right binding")
     }
 }
 

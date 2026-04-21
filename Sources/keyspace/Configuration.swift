@@ -14,6 +14,7 @@ struct ConfiguredBinding: Equatable {
 enum BindingTrigger: Equatable {
     case key(KeyCombo)
     case mouse(MouseButtonTrigger)
+    case scroll(ScrollWheelTrigger)
 
     var rawValue: String {
         switch self {
@@ -21,6 +22,8 @@ enum BindingTrigger: Equatable {
             return keyCombo.rawValue
         case let .mouse(mouseButtonTrigger):
             return mouseButtonTrigger.rawValue
+        case let .scroll(scrollWheelTrigger):
+            return scrollWheelTrigger.rawValue
         }
     }
 
@@ -50,6 +53,16 @@ enum BindingTrigger: Equatable {
             )
         }
 
+        if let direction = ScrollDirection(rawValue: triggerToken) {
+            return .scroll(
+                ScrollWheelTrigger(
+                    direction: direction,
+                    modifiers: modifiers,
+                    rawValue: normalized
+                )
+            )
+        }
+
         guard let keyCode = KeyCombo.keyCode(for: triggerToken) else {
             throw ConfigurationError.invalidTrigger(rawValue)
         }
@@ -70,6 +83,8 @@ enum BindingAction: Equatable {
     case moveWindowToSpace(Int)
     case moveWindowToSecondarySpace(Int)
     case tileCurrentDisplayMaster
+    case switchSpaceLeft
+    case switchSpaceRight
 }
 
 extension BindingAction: CustomStringConvertible {
@@ -85,6 +100,10 @@ extension BindingAction: CustomStringConvertible {
             return "move-window-to-secondary-space(\(index))"
         case .tileCurrentDisplayMaster:
             return "tile-current-display-master"
+        case .switchSpaceLeft:
+            return "switch-space-left"
+        case .switchSpaceRight:
+            return "switch-space-right"
         }
     }
 }
@@ -226,6 +245,26 @@ struct MouseButtonTrigger: Equatable, Hashable {
     }
 }
 
+enum ScrollDirection: String, Equatable, Hashable {
+    case left = "scroll-left"
+    case right = "scroll-right"
+}
+
+struct ScrollWheelTrigger: Equatable, Hashable {
+    let direction: ScrollDirection
+    let modifiers: NSEvent.ModifierFlags
+    let rawValue: String
+
+    static func == (lhs: ScrollWheelTrigger, rhs: ScrollWheelTrigger) -> Bool {
+        lhs.direction == rhs.direction && lhs.modifiers == rhs.modifiers
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(direction)
+        hasher.combine(modifiers.rawValue)
+    }
+}
+
 private extension Substring {
     func trimmingPrefix(_ prefix: Character) -> Substring {
         guard first == prefix else {
@@ -300,6 +339,8 @@ struct ConfigurationStore {
         # Syntax:
         # bind = modifiers+key, action, argument
         # bind = modifiers+mouse-N, action, argument
+        # bind = modifiers+scroll-left, action
+        # bind = modifiers+scroll-right, action
         #
         # Actions:
         # launch                          -> app name, bundle identifier, or app path
@@ -308,6 +349,8 @@ struct ConfigurationStore {
         # move-window-to-secondary-space  -> desktop number on the secondary display
         # tile-current-display-master     -> focused window becomes master on the left;
         #                                     other supported windows stack on the right
+        # switch-space-left               -> posts the macOS "move left a space" shortcut
+        # switch-space-right              -> posts the macOS "move right a space" shortcut
         #
         # Note:
         # shift+cmd+10 maps to the physical 0 key.
@@ -318,6 +361,8 @@ struct ConfigurationStore {
         # bind = cmd+shift+enter, shell, open -na Terminal
         # bind = shift+cmd+t, tile-current-display-master
         # bind = mouse-4, tile-current-display-master
+        # bind = scroll-left, switch-space-left
+        # bind = scroll-right, switch-space-right
 
         bind = shift+cmd+1, move-window-to-space, 1
         bind = shift+cmd+2, move-window-to-space, 2
@@ -410,6 +455,16 @@ struct ConfigurationParser {
                 throw ConfigurationError.invalidActionArgument(actionName, argument)
             }
             action = .tileCurrentDisplayMaster
+        case "switch-space-left":
+            guard argument.isEmpty else {
+                throw ConfigurationError.invalidActionArgument(actionName, argument)
+            }
+            action = .switchSpaceLeft
+        case "switch-space-right":
+            guard argument.isEmpty else {
+                throw ConfigurationError.invalidActionArgument(actionName, argument)
+            }
+            action = .switchSpaceRight
         default:
             throw ConfigurationError.invalidAction(actionName)
         }

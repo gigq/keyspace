@@ -9,22 +9,27 @@ final class AppController: NSObject {
     private let configurationWatcher = ConfigurationWatcher()
     private let hotKeyManager = HotKeyManager()
     private let mouseButtonManager = MouseButtonManager()
+    private let scrollWheelManager = ScrollWheelManager()
     private let launcher = AppLauncher()
     private let shellCommandRunner = ShellCommandRunner()
     private let focusedWindowManager = FocusedWindowManager()
     private let spaceManager = SpaceManager()
+    private let spaceSwitcher = SpaceSwitcher()
     private let windowDragSpaceMover = WindowDragSpaceMover()
     private let windowTilingManager = WindowTilingManager()
     private let debugLogger = DebugLogger()
 
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let menu = NSMenu()
+    private let spaceSwitchCooldownNanoseconds: UInt64 = 800_000_000
 
     private var configPathMenuItem = NSMenuItem()
     private var logPathMenuItem = NSMenuItem()
     private var lastEventMenuItem = NSMenuItem()
     private var permissionsMenuItem = NSMenuItem()
     private var activeSpaceObserver: NSObjectProtocol?
+    private var spaceSwitchInFlight = false
+    private var spaceSwitchUnlockTask: Task<Void, Never>?
 
     func start() {
         buildMenu()
@@ -42,6 +47,8 @@ final class AppController: NSObject {
         }
         hotKeyManager.unregisterAll()
         mouseButtonManager.unregisterAll()
+        scrollWheelManager.unregisterAll()
+        spaceSwitchUnlockTask?.cancel()
         configurationWatcher.stop()
     }
 
@@ -141,13 +148,25 @@ final class AppController: NSObject {
                     self?.perform(binding.action)
                 }
             }
+            let scrollRegistrations: [ScrollWheelRegistration] = configuration.bindings.compactMap { binding in
+                guard case let .scroll(scrollTrigger) = binding.trigger else {
+                    return nil
+                }
+
+                return ScrollWheelRegistration(trigger: scrollTrigger) { [weak self] in
+                    self?.logEvent("Hotkey pressed: \(binding.trigger.rawValue) -> \(binding.action.description)")
+                    self?.perform(binding.action)
+                }
+            }
 
             do {
                 try hotKeyManager.register(keyRegistrations)
                 try mouseButtonManager.register(mouseRegistrations)
+                try scrollWheelManager.register(scrollRegistrations)
             } catch {
                 hotKeyManager.unregisterAll()
                 mouseButtonManager.unregisterAll()
+                scrollWheelManager.unregisterAll()
                 throw error
             }
             refreshMenuState()
@@ -199,6 +218,10 @@ final class AppController: NSObject {
             )
         case .tileCurrentDisplayMaster:
             tileCurrentDisplayMaster()
+        case .switchSpaceLeft:
+            switchSpaceLeft()
+        case .switchSpaceRight:
+            switchSpaceRight()
         }
     }
 
@@ -253,6 +276,64 @@ final class AppController: NSObject {
             logger.error("Window tiling failed: \(error.localizedDescription, privacy: .public)")
             logEvent("Window tiling failed: \(error.localizedDescription)")
         }
+    }
+
+    private func switchSpaceLeft() {
+        guard beginSpaceSwitchIfPossible() else {
+            return
+        }
+
+        logEvent("Switching to the space on the left")
+
+        do {
+            try spaceSwitcher.switchLeft()
+            logEvent("Posted desktop switch shortcut ctrl+left")
+        } catch {
+            endSpaceSwitchLock()
+            logger.error("Switch space action failed: \(error.localizedDescription, privacy: .public)")
+            logEvent("Switch space action failed: \(error.localizedDescription)")
+        }
+    }
+
+    private func switchSpaceRight() {
+        guard beginSpaceSwitchIfPossible() else {
+            return
+        }
+
+        logEvent("Switching to the space on the right")
+
+        do {
+            try spaceSwitcher.switchRight()
+            logEvent("Posted desktop switch shortcut ctrl+right")
+        } catch {
+            endSpaceSwitchLock()
+            logger.error("Switch space action failed: \(error.localizedDescription, privacy: .public)")
+            logEvent("Switch space action failed: \(error.localizedDescription)")
+        }
+    }
+
+    private func beginSpaceSwitchIfPossible() -> Bool {
+        guard !spaceSwitchInFlight else {
+            return false
+        }
+
+        spaceSwitchInFlight = true
+        scheduleSpaceSwitchUnlock(after: spaceSwitchCooldownNanoseconds)
+        return true
+    }
+
+    private func scheduleSpaceSwitchUnlock(after nanoseconds: UInt64) {
+        spaceSwitchUnlockTask?.cancel()
+        spaceSwitchUnlockTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: nanoseconds)
+            self?.endSpaceSwitchLock()
+        }
+    }
+
+    private func endSpaceSwitchLock() {
+        spaceSwitchUnlockTask?.cancel()
+        spaceSwitchUnlockTask = nil
+        spaceSwitchInFlight = false
     }
 
     private func updateStatusItem() {
