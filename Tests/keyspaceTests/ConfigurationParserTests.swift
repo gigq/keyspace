@@ -8,8 +8,8 @@ func parsesDefaultStyleBindings() throws {
     let configuration = try parser.parse(
         """
         bind = cmd+enter, launch, com.mitchellh.ghostty
+        bind = cmd+1, switch-to-space, 1
         bind = shift+cmd+10, move-window-to-space, 10
-        bind = shift+cmd+option+3, move-window-to-secondary-space, 3
         bind = shift+cmd+t, tile-current-display-master
         bind = mouse-4, tile-current-display-master
         bind = scroll-left, switch-space-left
@@ -19,17 +19,17 @@ func parsesDefaultStyleBindings() throws {
 
     #expect(configuration.bindings.count == 7)
     #expect(configuration.bindings[0].action == .launch("com.mitchellh.ghostty"))
-    #expect(configuration.bindings[1].action == .moveWindowToSpace(10))
+    #expect(configuration.bindings[1].action == .switchToSpace(1))
     if case let .key(keyCombo) = configuration.bindings[1].trigger {
+        #expect(keyCombo.keyCode == UInt32(kVK_ANSI_1))
+    } else {
+        Issue.record("Expected a keyboard trigger for the switch-to-space binding")
+    }
+    #expect(configuration.bindings[2].action == .moveWindowToSpace(10))
+    if case let .key(keyCombo) = configuration.bindings[2].trigger {
         #expect(keyCombo.keyCode == UInt32(kVK_ANSI_0))
     } else {
         Issue.record("Expected a keyboard trigger for the desktop-10 binding")
-    }
-    #expect(configuration.bindings[2].action == .moveWindowToSecondarySpace(3))
-    if case let .key(keyCombo) = configuration.bindings[2].trigger {
-        #expect(keyCombo.modifiers.contains(.option))
-    } else {
-        Issue.record("Expected a keyboard trigger for the secondary-display binding")
     }
     #expect(configuration.bindings[3].action == .tileCurrentDisplayMaster)
     if case let .mouse(mouseTrigger) = configuration.bindings[4].trigger {

@@ -17,14 +17,14 @@ Current behavior:
 - loads bindings from `~/.config/keyspace/keyspace.conf`
 - stays in the menu bar
 - shows the current desktop number for each display in the menu bar
-- registers global keyboard and mouse-button bindings
+- registers global keyboard, mouse-button, and scroll bindings
 - launches apps from config
 - moves the focused window to desktop `N`
 - switches desktops with bound keys, mouse buttons, or horizontal scroll input
 - tiles the focused display into a manual master layout when requested
 
 On multi-display setups, the menu bar label shows one desktop number per display, ordered left to right, for example `2|11`.
-Window moves can target either the current display or the secondary display, depending on which action you bind.
+Window moves always target the display the focused window is already on, and `keyspace` resolves the matching Mission Control shortcut from macOS.
 
 ## What This Is
 
@@ -93,7 +93,12 @@ You can bind that to:
 - a mouse button
 - horizontal scroll input such as the MX Master side wheel
 
-Space switching is still explicit. One trigger produces one desktop change, then `keyspace` waits through a short cooldown before it accepts another scroll-based switch. That is intentional so one wheel gesture does not queue several Mission Control transitions at once.
+That includes both relative switching (`switch-space-left`, `switch-space-right`) and direct numbered switching (`switch-to-space, N`) for the focused display.
+
+Space switching is still explicit. One trigger produces one desktop change.
+
+- keyboard and mouse-button bindings post the resolved Mission Control shortcut immediately
+- scroll-based switching uses a short cooldown so one wheel gesture does not queue several Mission Control transitions at once
 
 The app uses the Mission Control left/right shortcut currently configured in macOS, rather than assuming a fixed hardcoded key combination.
 
@@ -102,10 +107,8 @@ The app uses the Mission Control left/right shortcut currently configured in mac
 The current built-in move workflow assumes these are true:
 
 1. `keyspace` has Accessibility permission
-2. Mission Control desktop shortcuts are set to `cmd+1` through `cmd+0`
+2. Mission Control desktop shortcuts are configured in macOS for the desktops you want to target
 3. conflicting screenshot shortcuts are disabled or rebound
-
-If you want secondary-display move bindings, also set macOS Mission Control shortcuts for the secondary display to `cmd+option+1` through `cmd+option+0`.
 
 The screenshot conflict matters because macOS uses `shift+cmd+3`, `shift+cmd+4`, and `shift+cmd+5` by default.
 
@@ -119,16 +122,28 @@ You can change Mission Control desktop shortcuts in:
 
 ## Default Config
 
-The first launch creates this config automatically. It reflects the current default assumptions about numbered Mission Control desktops on macOS:
+The first launch creates this config automatically. It reflects the current default assumption that one set of bindings is enough, because `keyspace` resolves the actual Mission Control desktop shortcut for the focused display:
 
 ```ini
 # Example app launch bindings:
 # bind = cmd+enter, launch, Terminal
 # bind = cmd+shift+enter, shell, open -na Terminal
+# bind = cmd+1, switch-to-space, 1
 # bind = shift+cmd+t, tile-current-display-master
 # bind = mouse-4, tile-current-display-master
 # bind = scroll-left, switch-space-left
 # bind = scroll-right, switch-space-right
+
+bind = cmd+1, switch-to-space, 1
+bind = cmd+2, switch-to-space, 2
+bind = cmd+3, switch-to-space, 3
+bind = cmd+4, switch-to-space, 4
+bind = cmd+5, switch-to-space, 5
+bind = cmd+6, switch-to-space, 6
+bind = cmd+7, switch-to-space, 7
+bind = cmd+8, switch-to-space, 8
+bind = cmd+9, switch-to-space, 9
+bind = cmd+10, switch-to-space, 10
 
 bind = shift+cmd+1, move-window-to-space, 1
 bind = shift+cmd+2, move-window-to-space, 2
@@ -140,22 +155,11 @@ bind = shift+cmd+7, move-window-to-space, 7
 bind = shift+cmd+8, move-window-to-space, 8
 bind = shift+cmd+9, move-window-to-space, 9
 bind = shift+cmd+10, move-window-to-space, 10
-
-bind = shift+cmd+option+1, move-window-to-secondary-space, 1
-bind = shift+cmd+option+2, move-window-to-secondary-space, 2
-bind = shift+cmd+option+3, move-window-to-secondary-space, 3
-bind = shift+cmd+option+4, move-window-to-secondary-space, 4
-bind = shift+cmd+option+5, move-window-to-secondary-space, 5
-bind = shift+cmd+option+6, move-window-to-secondary-space, 6
-bind = shift+cmd+option+7, move-window-to-secondary-space, 7
-bind = shift+cmd+option+8, move-window-to-secondary-space, 8
-bind = shift+cmd+option+9, move-window-to-secondary-space, 9
-bind = shift+cmd+option+10, move-window-to-secondary-space, 10
 ```
 
 `shift+cmd+10` maps to the physical `0` key.
 
-For these bindings to work, macOS Mission Control desktop shortcuts should be mapped to `cmd+1` through `cmd+0` in `System Settings > Keyboard > Keyboard Shortcuts > Mission Control`.
+For these bindings to work, macOS Mission Control desktop shortcuts should be configured for the desktops you want to target in `System Settings > Keyboard > Keyboard Shortcuts > Mission Control`.
 
 ## Config Format
 
@@ -173,7 +177,7 @@ Supported actions:
 - `launch`
 - `shell`
 - `move-window-to-space`
-- `move-window-to-secondary-space`
+- `switch-to-space`
 - `switch-space-left`
 - `switch-space-right`
 - `tile-current-display-master`
@@ -184,8 +188,8 @@ Examples:
 bind = cmd+enter, launch, Terminal
 bind = cmd+shift+enter, shell, open -na Terminal
 bind = cmd+b, launch, Safari
+bind = cmd+4, switch-to-space, 4
 bind = shift+cmd+4, move-window-to-space, 4
-bind = shift+cmd+option+4, move-window-to-secondary-space, 4
 bind = scroll-left, switch-space-left
 bind = scroll-right, switch-space-right
 bind = shift+cmd+t, tile-current-display-master
@@ -275,7 +279,8 @@ The generated app bundle is a menu bar app with `LSUIElement` enabled, so it sta
 ## Caveats
 
 - `move-window-to-space` requires Accessibility permission because the app needs the focused window ID and posts synthetic input events.
-- `move-window-to-secondary-space` uses the same drag-based move flow, but triggers the secondary-display Mission Control shortcut (`cmd+opt+N`) while the window is in transit.
+- `move-window-to-space` uses the Mission Control desktop shortcut configured in macOS for the focused display, instead of hardcoding one modifier combination.
+- `switch-to-space` uses that same focused-display resolution logic, but switches desktops without dragging a window.
 - `switch-space-left` and `switch-space-right` use the Mission Control left/right shortcut configured in macOS.
 - scroll-based space switching intentionally uses a cooldown so one wheel gesture does not skip across multiple desktops.
 - `tile-current-display-master` is intentionally manual. It does not automatically tile or retile windows when apps open, close, or change focus.

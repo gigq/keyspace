@@ -1,4 +1,5 @@
 import AppKit
+import Carbon
 import Foundation
 import OSLog
 
@@ -15,6 +16,7 @@ final class AppController: NSObject {
     private let focusedWindowManager = FocusedWindowManager()
     private let spaceManager = SpaceManager()
     private let spaceSwitcher = SpaceSwitcher()
+    private let missionControlShortcutResolver = MissionControlShortcutResolver()
     private let windowDragSpaceMover = WindowDragSpaceMover()
     private let windowTilingManager = WindowTilingManager()
     private let debugLogger = DebugLogger()
@@ -30,6 +32,21 @@ final class AppController: NSObject {
     private var activeSpaceObserver: NSObjectProtocol?
     private var spaceSwitchInFlight = false
     private var spaceSwitchUnlockTask: Task<Void, Never>?
+
+    private enum TriggerSource {
+        case keyboard
+        case mouseButton
+        case scroll
+
+        var usesSpaceSwitchCooldown: Bool {
+            switch self {
+            case .scroll:
+                return true
+            case .keyboard, .mouseButton:
+                return false
+            }
+        }
+    }
 
     func start() {
         buildMenu()
@@ -135,7 +152,7 @@ final class AppController: NSObject {
 
                 return HotKeyRegistration(keyCombo: keyCombo) { [weak self] in
                     self?.logEvent("Hotkey pressed: \(binding.trigger.rawValue) -> \(binding.action.description)")
-                    self?.perform(binding.action)
+                    self?.perform(binding.action, source: .keyboard)
                 }
             }
             let mouseRegistrations: [MouseButtonRegistration] = configuration.bindings.compactMap { binding in
@@ -145,7 +162,7 @@ final class AppController: NSObject {
 
                 return MouseButtonRegistration(trigger: mouseTrigger) { [weak self] in
                     self?.logEvent("Hotkey pressed: \(binding.trigger.rawValue) -> \(binding.action.description)")
-                    self?.perform(binding.action)
+                    self?.perform(binding.action, source: .mouseButton)
                 }
             }
             let scrollRegistrations: [ScrollWheelRegistration] = configuration.bindings.compactMap { binding in
@@ -155,7 +172,7 @@ final class AppController: NSObject {
 
                 return ScrollWheelRegistration(trigger: scrollTrigger) { [weak self] in
                     self?.logEvent("Hotkey pressed: \(binding.trigger.rawValue) -> \(binding.action.description)")
-                    self?.perform(binding.action)
+                    self?.perform(binding.action, source: .scroll)
                 }
             }
 
@@ -180,7 +197,7 @@ final class AppController: NSObject {
         }
     }
 
-    private func perform(_ action: BindingAction) {
+    private func perform(_ action: BindingAction, source: TriggerSource) {
         switch action {
         case let .launch(target):
             do {
@@ -203,35 +220,22 @@ final class AppController: NSObject {
             }
 
         case let .moveWindowToSpace(target):
-            moveFocusedWindow(
-                toDesktop: target,
-                targetDescription: "desktop \(target) on the current display",
-                shortcutModifiers: .maskCommand,
-                shortcutDescription: "cmd+\(target == 10 ? "0" : "\(target)")"
-            )
+            moveFocusedWindow(toDesktop: target)
         case let .moveWindowToSecondarySpace(target):
-            moveFocusedWindow(
-                toDesktop: target,
-                targetDescription: "desktop \(target) on the secondary display",
-                shortcutModifiers: [.maskCommand, .maskAlternate],
-                shortcutDescription: "cmd+opt+\(target == 10 ? "0" : "\(target)")"
-            )
+            moveFocusedWindow(toDesktop: target)
+        case let .switchToSpace(target):
+            switchFocusedDisplay(toDesktop: target, source: source)
         case .tileCurrentDisplayMaster:
             tileCurrentDisplayMaster()
         case .switchSpaceLeft:
-            switchSpaceLeft()
+            switchSpaceLeft(source: source)
         case .switchSpaceRight:
-            switchSpaceRight()
+            switchSpaceRight(source: source)
         }
     }
 
-    private func moveFocusedWindow(
-        toDesktop target: Int,
-        targetDescription: String,
-        shortcutModifiers: CGEventFlags,
-        shortcutDescription: String
-    ) {
-        logEvent("Preparing to move focused window to \(targetDescription)")
+    private func moveFocusedWindow(toDesktop target: Int) {
+        logEvent("Preparing to move focused window to desktop \(target) on the focused display")
         guard ensureAccessibilityPermission(promptIfMissing: true) else {
             logger.error("Accessibility permission is required to move windows between spaces")
             refreshMenuState()
@@ -242,19 +246,87 @@ final class AppController: NSObject {
         do {
             let focusedWindow = try focusedWindowManager.focusedWindowContext()
             logEvent("Focused window id=\(focusedWindow.windowID) pid=\(focusedWindow.processID) title=\(focusedWindow.title ?? "<nil>") frame=\(focusedWindow.frame.debugSummary)")
+            let displayIndex = try displayIndex(for: focusedWindow.frame)
+            guard let shortcut = missionControlShortcutResolver.desktopShortcut(desktopIndex: target, displayIndex: displayIndex) else {
+                throw MoveWindowShortcutError.shortcutUnavailable(desktop: target, display: displayIndex + 1)
+            }
+
             try windowDragSpaceMover.move(
                 window: focusedWindow,
-                toDesktop: target,
-                shortcutModifiers: shortcutModifiers,
-                shortcutDescription: shortcutDescription
+                shortcut: shortcut
             ) { [weak self] message in
                 self?.logEvent(message)
             }
-            logEvent("Move request completed for window \(focusedWindow.windowID) to \(targetDescription)")
+            logEvent("Move request completed for window \(focusedWindow.windowID) to desktop \(target) on display \(displayIndex + 1)")
             updateStatusItem()
         } catch {
             logger.error("Move window action failed: \(error.localizedDescription, privacy: .public)")
             logEvent("Move window action failed: \(error.localizedDescription)")
+        }
+    }
+
+    private func displayIndex(for frame: CGRect) throws -> Int {
+        let orderedScreens = NSScreen.screens.sorted { lhs, rhs in
+            if lhs.frame.minX != rhs.frame.minX {
+                return lhs.frame.minX < rhs.frame.minX
+            }
+            return lhs.frame.minY < rhs.frame.minY
+        }
+
+        if let index = orderedScreens.firstIndex(where: { $0.frame.intersects(frame) }) {
+            return index
+        }
+
+        let centerPoint = CGPoint(x: frame.midX, y: frame.midY)
+        if let index = orderedScreens.firstIndex(where: { $0.frame.contains(centerPoint) }) {
+            return index
+        }
+
+        throw MoveWindowShortcutError.displayUnavailable
+    }
+
+    private func focusedDisplayIndex() throws -> Int {
+        if let focusedWindow = try? focusedWindowManager.focusedWindowContext() {
+            return try displayIndex(for: focusedWindow.frame)
+        }
+
+        let mouseLocation = NSEvent.mouseLocation
+        let orderedScreens = NSScreen.screens.sorted { lhs, rhs in
+            if lhs.frame.minX != rhs.frame.minX {
+                return lhs.frame.minX < rhs.frame.minX
+            }
+            return lhs.frame.minY < rhs.frame.minY
+        }
+
+        if let index = orderedScreens.firstIndex(where: { $0.frame.contains(mouseLocation) }) {
+            return index
+        }
+
+        throw MoveWindowShortcutError.displayUnavailable
+    }
+
+    private func switchFocusedDisplay(toDesktop target: Int, source: TriggerSource) {
+        let usesCooldown = source.usesSpaceSwitchCooldown
+        guard beginSpaceSwitchIfPossible(usesCooldown: usesCooldown) else {
+            return
+        }
+
+        logEvent("Switching the focused display to desktop \(target)")
+
+        do {
+            let displayIndex = try focusedDisplayIndex()
+            guard let shortcut = missionControlShortcutResolver.desktopShortcut(desktopIndex: target, displayIndex: displayIndex) else {
+                throw MoveWindowShortcutError.shortcutUnavailable(desktop: target, display: displayIndex + 1)
+            }
+
+            try spaceSwitcher.postResolvedShortcut(shortcut)
+            logEvent("Posted desktop switch shortcut \(shortcut.debugDescription)")
+        } catch {
+            if usesCooldown {
+                endSpaceSwitchLock()
+            }
+            logger.error("Switch to space action failed: \(error.localizedDescription, privacy: .public)")
+            logEvent("Switch to space action failed: \(error.localizedDescription)")
         }
     }
 
@@ -278,41 +350,55 @@ final class AppController: NSObject {
         }
     }
 
-    private func switchSpaceLeft() {
-        guard beginSpaceSwitchIfPossible() else {
+    private func switchSpaceLeft(source: TriggerSource) {
+        let usesCooldown = source.usesSpaceSwitchCooldown
+        guard beginSpaceSwitchIfPossible(usesCooldown: usesCooldown) else {
             return
         }
 
         logEvent("Switching to the space on the left")
 
         do {
-            try spaceSwitcher.switchLeft()
-            logEvent("Posted desktop switch shortcut ctrl+left")
+            let shortcut = missionControlShortcutResolver.switchLeftShortcut()
+                ?? MissionControlShortcut(keyCode: CGKeyCode(kVK_LeftArrow), modifiers: .maskControl)
+            try spaceSwitcher.postResolvedShortcut(shortcut)
+            logEvent("Posted desktop switch shortcut \(shortcut.debugDescription)")
         } catch {
-            endSpaceSwitchLock()
+            if usesCooldown {
+                endSpaceSwitchLock()
+            }
             logger.error("Switch space action failed: \(error.localizedDescription, privacy: .public)")
             logEvent("Switch space action failed: \(error.localizedDescription)")
         }
     }
 
-    private func switchSpaceRight() {
-        guard beginSpaceSwitchIfPossible() else {
+    private func switchSpaceRight(source: TriggerSource) {
+        let usesCooldown = source.usesSpaceSwitchCooldown
+        guard beginSpaceSwitchIfPossible(usesCooldown: usesCooldown) else {
             return
         }
 
         logEvent("Switching to the space on the right")
 
         do {
-            try spaceSwitcher.switchRight()
-            logEvent("Posted desktop switch shortcut ctrl+right")
+            let shortcut = missionControlShortcutResolver.switchRightShortcut()
+                ?? MissionControlShortcut(keyCode: CGKeyCode(kVK_RightArrow), modifiers: .maskControl)
+            try spaceSwitcher.postResolvedShortcut(shortcut)
+            logEvent("Posted desktop switch shortcut \(shortcut.debugDescription)")
         } catch {
-            endSpaceSwitchLock()
+            if usesCooldown {
+                endSpaceSwitchLock()
+            }
             logger.error("Switch space action failed: \(error.localizedDescription, privacy: .public)")
             logEvent("Switch space action failed: \(error.localizedDescription)")
         }
     }
 
-    private func beginSpaceSwitchIfPossible() -> Bool {
+    private func beginSpaceSwitchIfPossible(usesCooldown: Bool) -> Bool {
+        guard usesCooldown else {
+            return true
+        }
+
         guard !spaceSwitchInFlight else {
             return false
         }
@@ -435,6 +521,20 @@ final class AppController: NSObject {
     private func quit() {
         logEvent("Quit requested")
         NSApp.terminate(nil)
+    }
+}
+
+enum MoveWindowShortcutError: LocalizedError {
+    case displayUnavailable
+    case shortcutUnavailable(desktop: Int, display: Int)
+
+    var errorDescription: String? {
+        switch self {
+        case .displayUnavailable:
+            return "Unable to resolve the focused display for the window move"
+        case let .shortcutUnavailable(desktop, display):
+            return "No Mission Control shortcut is configured for desktop \(desktop) on display \(display)"
+        }
     }
 }
 

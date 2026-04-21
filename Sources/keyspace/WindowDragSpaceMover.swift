@@ -9,15 +9,9 @@ final class WindowDragSpaceMover {
 
     func move(
         window: FocusedWindowContext,
-        toDesktop target: Int,
-        shortcutModifiers: CGEventFlags = .maskCommand,
-        shortcutDescription: String? = nil,
+        shortcut: MissionControlShortcut,
         log: ((String) -> Void)? = nil
     ) throws {
-        guard target > 0 else {
-            throw WindowDragSpaceMoverError.invalidDesktop(target)
-        }
-
         guard let eventSource else {
             throw WindowDragSpaceMoverError.eventSourceUnavailable
         }
@@ -40,9 +34,8 @@ final class WindowDragSpaceMover {
         postMouseEvent(.leftMouseDragged, at: dragPoint, source: eventSource)
         sleep(milliseconds: 80)
 
-        let shortcutLabel = shortcutDescription ?? shortcutLabel(for: target, modifiers: shortcutModifiers)
-        try postDesktopShortcut(for: target, modifiers: shortcutModifiers, source: eventSource)
-        log?("Posted desktop switch shortcut \(shortcutLabel)")
+        postShortcut(shortcut, source: eventSource)
+        log?("Posted desktop switch shortcut \(shortcut.debugDescription)")
         sleep(milliseconds: 450)
 
         postMouseEvent(.leftMouseUp, at: currentMouseLocation(), source: eventSource)
@@ -50,40 +43,26 @@ final class WindowDragSpaceMover {
         moveMouse(to: originalMouseLocation, source: eventSource)
     }
 
-    private func postDesktopShortcut(for target: Int, modifiers: CGEventFlags, source: CGEventSource) throws {
-        let key: String
-        switch target {
-        case 10:
-            key = "0"
-        default:
-            key = "\(target)"
+    private func postShortcut(_ shortcut: MissionControlShortcut, source: CGEventSource) {
+        let modifierKeyCodes = shortcut.modifierKeyCodes
+
+        for (index, modifierKeyCode) in modifierKeyCodes.enumerated() {
+            postKeyEvent(keyCode: modifierKeyCode, keyDown: true, source: source, flags: shortcut.modifiers)
+            if index < modifierKeyCodes.count - 1 {
+                sleep(milliseconds: 10)
+            }
         }
 
-        let keyCode = try KeyCombo.parse(key).keyCode
-
-        postKeyEvent(keyCode: CGKeyCode(keyCode), keyDown: true, source: source, flags: modifiers)
         sleep(milliseconds: 20)
-        postKeyEvent(keyCode: CGKeyCode(keyCode), keyDown: false, source: source, flags: modifiers)
-    }
+        postKeyEvent(keyCode: shortcut.keyCode, keyDown: true, source: source, flags: shortcut.modifiers)
+        sleep(milliseconds: 20)
+        postKeyEvent(keyCode: shortcut.keyCode, keyDown: false, source: source, flags: shortcut.modifiers)
+        sleep(milliseconds: 20)
 
-    private func shortcutLabel(for target: Int, modifiers: CGEventFlags) -> String {
-        var parts: [String] = []
-
-        if modifiers.contains(.maskCommand) {
-            parts.append("cmd")
+        for modifierKeyCode in modifierKeyCodes.reversed() {
+            postKeyEvent(keyCode: modifierKeyCode, keyDown: false, source: source, flags: [])
+            sleep(milliseconds: 10)
         }
-        if modifiers.contains(.maskAlternate) {
-            parts.append("opt")
-        }
-        if modifiers.contains(.maskShift) {
-            parts.append("shift")
-        }
-        if modifiers.contains(.maskControl) {
-            parts.append("ctrl")
-        }
-
-        parts.append(target == 10 ? "0" : "\(target)")
-        return parts.joined(separator: "+")
     }
 
     private func currentMouseLocation() -> CGPoint {
@@ -121,13 +100,10 @@ final class WindowDragSpaceMover {
 }
 
 enum WindowDragSpaceMoverError: LocalizedError {
-    case invalidDesktop(Int)
     case eventSourceUnavailable
 
     var errorDescription: String? {
         switch self {
-        case let .invalidDesktop(target):
-            return "Invalid desktop target: \(target)"
         case .eventSourceUnavailable:
             return "Unable to create HID event source for drag move"
         }

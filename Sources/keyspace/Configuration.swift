@@ -82,6 +82,7 @@ enum BindingAction: Equatable {
     case shell(String)
     case moveWindowToSpace(Int)
     case moveWindowToSecondarySpace(Int)
+    case switchToSpace(Int)
     case tileCurrentDisplayMaster
     case switchSpaceLeft
     case switchSpaceRight
@@ -97,7 +98,9 @@ extension BindingAction: CustomStringConvertible {
         case let .moveWindowToSpace(index):
             return "move-window-to-space(\(index))"
         case let .moveWindowToSecondarySpace(index):
-            return "move-window-to-secondary-space(\(index))"
+            return "move-window-to-space(\(index))"
+        case let .switchToSpace(index):
+            return "switch-to-space(\(index))"
         case .tileCurrentDisplayMaster:
             return "tile-current-display-master"
         case .switchSpaceLeft:
@@ -345,8 +348,8 @@ struct ConfigurationStore {
         # Actions:
         # launch                          -> app name, bundle identifier, or app path
         # shell                           -> shell command
-        # move-window-to-space            -> desktop number on the current display
-        # move-window-to-secondary-space  -> desktop number on the secondary display
+        # move-window-to-space            -> desktop number on the focused display
+        # switch-to-space                 -> switch the focused display to desktop number N
         # tile-current-display-master     -> focused window becomes master on the left;
         #                                     other supported windows stack on the right
         # switch-space-left               -> posts the macOS "move left a space" shortcut
@@ -359,10 +362,22 @@ struct ConfigurationStore {
         # Example app launch bindings:
         # bind = cmd+enter, launch, Terminal
         # bind = cmd+shift+enter, shell, open -na Terminal
+        # bind = cmd+1, switch-to-space, 1
         # bind = shift+cmd+t, tile-current-display-master
         # bind = mouse-4, tile-current-display-master
         # bind = scroll-left, switch-space-left
         # bind = scroll-right, switch-space-right
+
+        bind = cmd+1, switch-to-space, 1
+        bind = cmd+2, switch-to-space, 2
+        bind = cmd+3, switch-to-space, 3
+        bind = cmd+4, switch-to-space, 4
+        bind = cmd+5, switch-to-space, 5
+        bind = cmd+6, switch-to-space, 6
+        bind = cmd+7, switch-to-space, 7
+        bind = cmd+8, switch-to-space, 8
+        bind = cmd+9, switch-to-space, 9
+        bind = cmd+10, switch-to-space, 10
 
         bind = shift+cmd+1, move-window-to-space, 1
         bind = shift+cmd+2, move-window-to-space, 2
@@ -374,17 +389,6 @@ struct ConfigurationStore {
         bind = shift+cmd+8, move-window-to-space, 8
         bind = shift+cmd+9, move-window-to-space, 9
         bind = shift+cmd+10, move-window-to-space, 10
-
-        bind = shift+cmd+option+1, move-window-to-secondary-space, 1
-        bind = shift+cmd+option+2, move-window-to-secondary-space, 2
-        bind = shift+cmd+option+3, move-window-to-secondary-space, 3
-        bind = shift+cmd+option+4, move-window-to-secondary-space, 4
-        bind = shift+cmd+option+5, move-window-to-secondary-space, 5
-        bind = shift+cmd+option+6, move-window-to-secondary-space, 6
-        bind = shift+cmd+option+7, move-window-to-secondary-space, 7
-        bind = shift+cmd+option+8, move-window-to-secondary-space, 8
-        bind = shift+cmd+option+9, move-window-to-secondary-space, 9
-        bind = shift+cmd+option+10, move-window-to-secondary-space, 10
         """
     }
 }
@@ -449,7 +453,14 @@ struct ConfigurationParser {
             guard let targetSpace = Int(argument), targetSpace > 0 else {
                 throw ConfigurationError.invalidActionArgument(actionName, argument)
             }
+            // Legacy alias kept for compatibility with older configs. Moves are
+            // now resolved against the focused display's Mission Control shortcut.
             action = .moveWindowToSecondarySpace(targetSpace)
+        case "switch-to-space":
+            guard let targetSpace = Int(argument), targetSpace > 0 else {
+                throw ConfigurationError.invalidActionArgument(actionName, argument)
+            }
+            action = .switchToSpace(targetSpace)
         case "tile-current-display-master":
             guard argument.isEmpty else {
                 throw ConfigurationError.invalidActionArgument(actionName, argument)
