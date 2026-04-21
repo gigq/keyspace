@@ -27,6 +27,11 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
       - name: Derive release version
         run: echo "RELEASE_VERSION=${VERSION#v}" >> "$GITHUB_ENV"
 
