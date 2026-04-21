@@ -8,11 +8,13 @@ final class AppController: NSObject {
     private let configurationStore = ConfigurationStore()
     private let configurationWatcher = ConfigurationWatcher()
     private let hotKeyManager = HotKeyManager()
+    private let mouseButtonManager = MouseButtonManager()
     private let launcher = AppLauncher()
     private let shellCommandRunner = ShellCommandRunner()
     private let focusedWindowManager = FocusedWindowManager()
     private let spaceManager = SpaceManager()
     private let windowDragSpaceMover = WindowDragSpaceMover()
+    private let windowTilingManager = WindowTilingManager()
     private let debugLogger = DebugLogger()
 
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -39,6 +41,7 @@ final class AppController: NSObject {
             NSWorkspace.shared.notificationCenter.removeObserver(activeSpaceObserver)
         }
         hotKeyManager.unregisterAll()
+        mouseButtonManager.unregisterAll()
         configurationWatcher.stop()
     }
 
@@ -118,13 +121,35 @@ final class AppController: NSObject {
     private func reloadConfiguration() {
         do {
             let configuration = try configurationStore.load()
-            let registrations = configuration.bindings.map { binding in
-                HotKeyRegistration(keyCombo: binding.keyCombo) { [weak self] in
-                    self?.logEvent("Hotkey pressed: \(binding.keyCombo.rawValue) -> \(binding.action.description)")
+            let keyRegistrations: [HotKeyRegistration] = configuration.bindings.compactMap { binding in
+                guard case let .key(keyCombo) = binding.trigger else {
+                    return nil
+                }
+
+                return HotKeyRegistration(keyCombo: keyCombo) { [weak self] in
+                    self?.logEvent("Hotkey pressed: \(binding.trigger.rawValue) -> \(binding.action.description)")
                     self?.perform(binding.action)
                 }
             }
-            try hotKeyManager.register(registrations)
+            let mouseRegistrations: [MouseButtonRegistration] = configuration.bindings.compactMap { binding in
+                guard case let .mouse(mouseTrigger) = binding.trigger else {
+                    return nil
+                }
+
+                return MouseButtonRegistration(trigger: mouseTrigger) { [weak self] in
+                    self?.logEvent("Hotkey pressed: \(binding.trigger.rawValue) -> \(binding.action.description)")
+                    self?.perform(binding.action)
+                }
+            }
+
+            do {
+                try hotKeyManager.register(keyRegistrations)
+                try mouseButtonManager.register(mouseRegistrations)
+            } catch {
+                hotKeyManager.unregisterAll()
+                mouseButtonManager.unregisterAll()
+                throw error
+            }
             refreshMenuState()
             updateStatusItem()
             logger.info("Loaded \(configuration.bindings.count) bindings from config")
@@ -172,6 +197,8 @@ final class AppController: NSObject {
                 shortcutModifiers: [.maskCommand, .maskAlternate],
                 shortcutDescription: "cmd+opt+\(target == 10 ? "0" : "\(target)")"
             )
+        case .tileCurrentDisplayMaster:
+            tileCurrentDisplayMaster()
         }
     }
 
@@ -205,6 +232,26 @@ final class AppController: NSObject {
         } catch {
             logger.error("Move window action failed: \(error.localizedDescription, privacy: .public)")
             logEvent("Move window action failed: \(error.localizedDescription)")
+        }
+    }
+
+    private func tileCurrentDisplayMaster() {
+        logEvent("Preparing master-stack tiling for the focused display")
+        guard ensureAccessibilityPermission(promptIfMissing: true) else {
+            logger.error("Accessibility permission is required to tile windows")
+            refreshMenuState()
+            logEvent("Tiling aborted: missing Accessibility permission")
+            return
+        }
+
+        do {
+            try windowTilingManager.tileCurrentDisplayWithFocusedWindowAsMaster { [weak self] message in
+                self?.logEvent(message)
+            }
+            logEvent("Master-stack tiling completed")
+        } catch {
+            logger.error("Window tiling failed: \(error.localizedDescription, privacy: .public)")
+            logEvent("Window tiling failed: \(error.localizedDescription)")
         }
     }
 

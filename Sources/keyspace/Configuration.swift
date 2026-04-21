@@ -7,8 +7,61 @@ struct KeyspaceConfiguration: Equatable {
 }
 
 struct ConfiguredBinding: Equatable {
-    let keyCombo: KeyCombo
+    let trigger: BindingTrigger
     let action: BindingAction
+}
+
+enum BindingTrigger: Equatable {
+    case key(KeyCombo)
+    case mouse(MouseButtonTrigger)
+
+    var rawValue: String {
+        switch self {
+        case let .key(keyCombo):
+            return keyCombo.rawValue
+        case let .mouse(mouseButtonTrigger):
+            return mouseButtonTrigger.rawValue
+        }
+    }
+
+    static func parse(_ rawValue: String) throws -> BindingTrigger {
+        let normalized = rawValue
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+
+        let parts = normalized
+            .split(separator: "+")
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        guard let triggerToken = parts.last else {
+            throw ConfigurationError.invalidTrigger(rawValue)
+        }
+
+        let modifiers = try NSEvent.ModifierFlags.parse(parts.dropLast(), rawValue: rawValue)
+
+        if let buttonNumber = MouseButtonTrigger.buttonNumber(for: triggerToken) {
+            return .mouse(
+                MouseButtonTrigger(
+                    buttonNumber: buttonNumber,
+                    modifiers: modifiers,
+                    rawValue: normalized
+                )
+            )
+        }
+
+        guard let keyCode = KeyCombo.keyCode(for: triggerToken) else {
+            throw ConfigurationError.invalidTrigger(rawValue)
+        }
+
+        return .key(
+            KeyCombo(
+                keyCode: keyCode,
+                modifiers: modifiers,
+                rawValue: normalized
+            )
+        )
+    }
 }
 
 enum BindingAction: Equatable {
@@ -16,6 +69,7 @@ enum BindingAction: Equatable {
     case shell(String)
     case moveWindowToSpace(Int)
     case moveWindowToSecondarySpace(Int)
+    case tileCurrentDisplayMaster
 }
 
 extension BindingAction: CustomStringConvertible {
@@ -29,6 +83,8 @@ extension BindingAction: CustomStringConvertible {
             return "move-window-to-space(\(index))"
         case let .moveWindowToSecondarySpace(index):
             return "move-window-to-secondary-space(\(index))"
+        case .tileCurrentDisplayMaster:
+            return "tile-current-display-master"
         }
     }
 }
@@ -58,48 +114,13 @@ struct KeyCombo: Equatable {
     }
 
     static func parse(_ rawValue: String) throws -> KeyCombo {
-        let normalized = rawValue
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-
-        let parts = normalized
-            .split(separator: "+")
-            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-
-        guard let keyToken = parts.last else {
+        guard case let .key(keyCombo) = try BindingTrigger.parse(rawValue) else {
             throw ConfigurationError.invalidKeyCombo(rawValue)
         }
-
-        var modifiers: NSEvent.ModifierFlags = []
-
-        for token in parts.dropLast() {
-            switch token {
-            case "cmd", "command", "super":
-                modifiers.insert(.command)
-            case "shift":
-                modifiers.insert(.shift)
-            case "alt", "option":
-                modifiers.insert(.option)
-            case "ctrl", "control":
-                modifiers.insert(.control)
-            default:
-                throw ConfigurationError.invalidModifier(token, rawValue)
-            }
-        }
-
-        guard let keyCode = Self.keyCode(for: keyToken) else {
-            throw ConfigurationError.invalidKey(rawValue)
-        }
-
-        return KeyCombo(
-            keyCode: keyCode,
-            modifiers: modifiers.intersection([.command, .shift, .option, .control]),
-            rawValue: normalized
-        )
+        return keyCombo
     }
 
-    private static func keyCode(for token: String) -> UInt32? {
+    static func keyCode(for token: String) -> UInt32? {
         let keys: [String: UInt32] = [
             "a": UInt32(kVK_ANSI_A),
             "b": UInt32(kVK_ANSI_B),
@@ -177,6 +198,68 @@ struct KeyCombo: Equatable {
     }
 }
 
+struct MouseButtonTrigger: Equatable, Hashable {
+    let buttonNumber: UInt32
+    let modifiers: NSEvent.ModifierFlags
+    let rawValue: String
+
+    static func == (lhs: MouseButtonTrigger, rhs: MouseButtonTrigger) -> Bool {
+        lhs.buttonNumber == rhs.buttonNumber && lhs.modifiers == rhs.modifiers
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(buttonNumber)
+        hasher.combine(modifiers.rawValue)
+    }
+
+    static func buttonNumber(for token: String) -> UInt32? {
+        guard token.hasPrefix("mouse") else {
+            return nil
+        }
+
+        let suffix = token.dropFirst("mouse".count).trimmingPrefix("-")
+        guard let humanButtonNumber = UInt32(suffix), humanButtonNumber > 0 else {
+            return nil
+        }
+
+        return humanButtonNumber
+    }
+}
+
+private extension Substring {
+    func trimmingPrefix(_ prefix: Character) -> Substring {
+        guard first == prefix else {
+            return self
+        }
+        return dropFirst()
+    }
+}
+
+extension NSEvent.ModifierFlags {
+    static let supportedBindingModifiers: NSEvent.ModifierFlags = [.command, .shift, .option, .control]
+
+    static func parse<S: Sequence>(_ tokens: S, rawValue: String) throws -> NSEvent.ModifierFlags where S.Element == String {
+        var modifiers: NSEvent.ModifierFlags = []
+
+        for token in tokens {
+            switch token {
+            case "cmd", "command", "super":
+                modifiers.insert(.command)
+            case "shift":
+                modifiers.insert(.shift)
+            case "alt", "option":
+                modifiers.insert(.option)
+            case "ctrl", "control":
+                modifiers.insert(.control)
+            default:
+                throw ConfigurationError.invalidModifier(token, rawValue)
+            }
+        }
+
+        return modifiers.intersection(Self.supportedBindingModifiers)
+    }
+}
+
 struct ConfigurationStore {
     let configURL: URL
 
@@ -216,19 +299,25 @@ struct ConfigurationStore {
         #
         # Syntax:
         # bind = modifiers+key, action, argument
+        # bind = modifiers+mouse-N, action, argument
         #
         # Actions:
         # launch                          -> app name, bundle identifier, or app path
         # shell                           -> shell command
         # move-window-to-space            -> desktop number on the current display
         # move-window-to-secondary-space  -> desktop number on the secondary display
+        # tile-current-display-master     -> focused window becomes master on the left;
+        #                                     other supported windows stack on the right
         #
         # Note:
         # shift+cmd+10 maps to the physical 0 key.
+        # mouse-1=left, mouse-2=right, mouse-3=middle, mouse-4+=extra buttons
 
         # Example app launch bindings:
         # bind = cmd+enter, launch, Terminal
         # bind = cmd+shift+enter, shell, open -na Terminal
+        # bind = shift+cmd+t, tile-current-display-master
+        # bind = mouse-4, tile-current-display-master
 
         bind = shift+cmd+1, move-window-to-space, 1
         bind = shift+cmd+2, move-window-to-space, 2
@@ -292,13 +381,13 @@ struct ConfigurationParser {
             .split(separator: ",", maxSplits: 2, omittingEmptySubsequences: false)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
 
-        guard parts.count == 3 else {
+        guard parts.count == 2 || parts.count == 3 else {
             throw ConfigurationError.invalidLine(line)
         }
 
-        let keyCombo = try KeyCombo.parse(parts[0])
+        let trigger = try BindingTrigger.parse(parts[0])
         let actionName = parts[1].lowercased()
-        let argument = parts[2]
+        let argument = parts.count == 3 ? parts[2] : ""
 
         let action: BindingAction
         switch actionName {
@@ -316,17 +405,23 @@ struct ConfigurationParser {
                 throw ConfigurationError.invalidActionArgument(actionName, argument)
             }
             action = .moveWindowToSecondarySpace(targetSpace)
+        case "tile-current-display-master":
+            guard argument.isEmpty else {
+                throw ConfigurationError.invalidActionArgument(actionName, argument)
+            }
+            action = .tileCurrentDisplayMaster
         default:
             throw ConfigurationError.invalidAction(actionName)
         }
 
-        return ConfiguredBinding(keyCombo: keyCombo, action: action)
+        return ConfiguredBinding(trigger: trigger, action: action)
     }
 }
 
 enum ConfigurationError: LocalizedError, Equatable {
     case invalidLine(String)
     case invalidDirective(String)
+    case invalidTrigger(String)
     case invalidKeyCombo(String)
     case invalidModifier(String, String)
     case invalidKey(String)
@@ -340,6 +435,8 @@ enum ConfigurationError: LocalizedError, Equatable {
             return "Invalid config line: \(line)"
         case let .invalidDirective(directive):
             return "Unsupported directive: \(directive)"
+        case let .invalidTrigger(rawValue):
+            return "Unsupported trigger in '\(rawValue)'"
         case let .invalidKeyCombo(rawValue):
             return "Invalid key combo: \(rawValue)"
         case let .invalidModifier(modifier, rawValue):

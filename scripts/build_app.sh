@@ -15,10 +15,18 @@ CONFIGURATION="${CONFIGURATION:-release}"
 MINIMUM_SYSTEM_VERSION="${MINIMUM_SYSTEM_VERSION:-14.0}"
 VERSION="${VERSION:-0.1.0}"
 BUILD_NUMBER="${BUILD_NUMBER:-1}"
-SIGNING_IDENTITY="${SIGNING_IDENTITY:--}"
+SIGNING_IDENTITY="${SIGNING_IDENTITY:-}"
 ENABLE_HARDENED_RUNTIME="${ENABLE_HARDENED_RUNTIME:-0}"
 
 cd "$ROOT_DIR"
+
+if [[ -z "$SIGNING_IDENTITY" ]]; then
+  SIGNING_IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null | awk -F'"' '/Developer ID Application:/ { print $2; exit }')"
+fi
+
+if [[ -z "$SIGNING_IDENTITY" ]]; then
+  SIGNING_IDENTITY="-"
+fi
 
 # Prefer the full Xcode toolchain when the active developer directory points at
 # older Command Line Tools. This avoids tool-version mismatches for local builds.
