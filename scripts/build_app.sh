@@ -35,6 +35,12 @@ mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 cp "$EXECUTABLE_PATH" "$MACOS_DIR/$APP_NAME"
 chmod +x "$MACOS_DIR/$APP_NAME"
 
+ICON_SRC="$ROOT_DIR/Resources/AppIcon.icns"
+if [[ ! -f "$ICON_SRC" ]]; then
+  "$ROOT_DIR/scripts/build_icon.sh"
+fi
+cp "$ICON_SRC" "$RESOURCES_DIR/AppIcon.icns"
+
 cat > "$CONTENTS_DIR/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -44,6 +50,8 @@ cat > "$CONTENTS_DIR/Info.plist" <<PLIST
   <string>en</string>
   <key>CFBundleExecutable</key>
   <string>$APP_NAME</string>
+  <key>CFBundleIconFile</key>
+  <string>AppIcon</string>
   <key>CFBundleIdentifier</key>
   <string>$BUNDLE_ID</string>
   <key>CFBundleInfoDictionaryVersion</key>
