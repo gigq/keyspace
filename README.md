@@ -1,8 +1,16 @@
 # Keyspace
 
-`keyspace` is a small native macOS menu bar app for Linux-style hotkey workflows.
+`keyspace` is a small native macOS menu bar app for people who want a Hyprland-style workspace workflow on macOS.
 
-It loads global hotkeys from a config file, launches apps, and moves the focused window between desktops.
+The goal is not to recreate Hyprland or replace the macOS window manager. The goal is narrower: bring a numbered, keyboard-driven, per-display workspace workflow to Mission Control while keeping the tool lightweight and config-driven.
+
+The reference point for this project is Hyprland's workspace model and the way it lets you describe workspace-specific behavior:
+
+- https://wiki.hypr.land/Configuring/Workspace-Rules/
+
+If you already think in terms of "workspace 1 on this monitor", "move the focused window to workspace 4", and "keep the active workspace state visible", this app is trying to make that feel natural on macOS.
+
+Today, `keyspace` loads global hotkeys from a config file, launches apps, and moves the focused window between numbered desktops.
 
 Current behavior:
 
@@ -15,6 +23,21 @@ Current behavior:
 
 On multi-display setups, the menu bar label shows one desktop number per display, ordered left to right, for example `2|11`.
 Window moves can target either the current display or the secondary display, depending on which action you bind.
+
+## What This Is
+
+`keyspace` is a keyboard-first Mission Control helper. It is designed for people who want:
+
+- numbered desktops that matter
+- predictable hotkeys for moving work between desktops
+- per-display desktop awareness in the menu bar
+- a plain-text config instead of a full desktop environment
+
+## What This Is Not
+
+`keyspace` is not a compositor, tiling window manager, or full Hyprland clone.
+
+It does not replace Finder, Dock, or Mission Control. It layers on top of macOS and tries to make workspace movement feel closer to a Hyprland-style setup using the mechanisms macOS actually gives us.
 
 ## How Window Moves Work
 
@@ -31,7 +54,7 @@ That means this app works best when your setup already supports the manual gestu
 
 ## Prerequisites
 
-Before using `move-window-to-space`, make sure these are true:
+The current built-in move workflow assumes these are true:
 
 1. `keyspace` has Accessibility permission
 2. Mission Control desktop shortcuts are set to `cmd+1` through `cmd+0`
@@ -51,7 +74,7 @@ You can change Mission Control desktop shortcuts in:
 
 ## Default Config
 
-The first launch creates this config automatically:
+The first launch creates this config automatically. It reflects the current default assumptions about numbered Mission Control desktops on macOS:
 
 ```ini
 # Example app launch bindings:

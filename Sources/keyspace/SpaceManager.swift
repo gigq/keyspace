@@ -5,11 +5,8 @@ import Foundation
 
 @MainActor
 final class SpaceManager {
-    private typealias SLSConnectionID = Int32
-    private typealias SLSSpaceID = UInt64
-    private static let allSpacesMask: Int32 = 0x7
-    private static let compatWorkspace = Int32(bitPattern: 0x79616265)
-
+    // This file only tracks visible desktops for the menu bar. Window moves use
+    // the Accessibility + synthetic input path in WindowDragSpaceMover instead.
     func visibleDisplaySpaces() -> [VisibleDisplaySpace] {
         let activeSpaceID = activeSpaceID()
 
@@ -21,106 +18,6 @@ final class SpaceManager {
                     desktopIndex: display.visibleDesktopIndex(fallbackSpaceID: activeSpaceID)
                 )
             }
-    }
-
-    func moveWindow(windowID: CGWindowID, toUserSpaceIndex targetIndex: Int, log: ((String) -> Void)? = nil) throws {
-        log?("Space snapshot before move: \(debugSummary())")
-        let currentSpaceIDs = windowSpaceIDs(for: windowID)
-        log?("Window \(windowID) currently belongs to spaces \(currentSpaceIDs)")
-        guard !currentSpaceIDs.isEmpty else {
-            throw SpaceManagerError.windowHasNoSpace
-        }
-
-        let snapshots = displaySnapshots()
-        let targetSpaceID = try resolveTargetSpaceID(for: windowID, targetIndex: targetIndex, currentSpaceIDs: currentSpaceIDs, snapshots: snapshots)
-        let connection = try slsConnection()
-
-        guard Self.api.spaceGetType?(connection, targetSpaceID) == 0 else {
-            throw SpaceManagerError.targetSpaceNotUserSpace(targetSpaceID)
-        }
-        let sourceDisplay = try resolveSourceDisplay(currentSpaceIDs: currentSpaceIDs, snapshots: snapshots)
-        log?("Resolved source display user spaces \(sourceDisplay.userSpaces.map(\.id))")
-        log?("Target desktop \(targetIndex) maps to space id \(targetSpaceID)")
-        if currentSpaceIDs.contains(targetSpaceID) {
-            log?("Window \(windowID) is already on target space \(targetSpaceID)")
-            return
-        }
-
-        let sourceSpaceID = currentSpaceIDs[0]
-        guard Self.api.spaceGetType?(connection, sourceSpaceID) == 0 else {
-            throw SpaceManagerError.sourceSpaceNotUserSpace(sourceSpaceID)
-        }
-
-        try moveWindowViaManagedSpaceAPI(connection: connection, windowID: windowID, targetSpaceID: targetSpaceID, log: log)
-
-        let updatedSpaceIDs = windowSpaceIDs(for: windowID)
-        log?("Window \(windowID) spaces after move request: \(updatedSpaceIDs)")
-        log?("Space snapshot after move request: \(debugSummary())")
-
-        guard updatedSpaceIDs.contains(targetSpaceID) else {
-            throw SpaceManagerError.moveVerificationFailed(windowID, targetSpaceID, updatedSpaceIDs)
-        }
-    }
-
-    func targetSpaceID(for windowID: CGWindowID, targetIndex: Int) throws -> UInt64 {
-        let currentSpaceIDs = windowSpaceIDs(for: windowID)
-        guard !currentSpaceIDs.isEmpty else {
-            throw SpaceManagerError.windowHasNoSpace
-        }
-
-        return try resolveTargetSpaceID(
-            for: windowID,
-            targetIndex: targetIndex,
-            currentSpaceIDs: currentSpaceIDs,
-            snapshots: displaySnapshots()
-        )
-    }
-
-    private func moveWindowViaManagedSpaceAPI(connection: SLSConnectionID, windowID: CGWindowID, targetSpaceID: SLSSpaceID, log: ((String) -> Void)? = nil) throws {
-        let windows = [NSNumber(value: windowID)] as CFArray
-
-        if Self.requiresCompatMovePath() {
-            log?("Using compat workspace move path for macOS 14.5+")
-            guard let spaceSetCompatID = Self.api.spaceSetCompatID else {
-                throw SpaceManagerError.missingPrivateSymbol("SLSSpaceSetCompatID")
-            }
-            let compatSetError = spaceSetCompatID(connection, targetSpaceID, Self.compatWorkspace)
-            guard compatSetError == .success else {
-                throw SpaceManagerError.compatSpaceAssignmentFailed(targetSpaceID, compatSetError)
-            }
-
-            var mutableWindowID = UInt32(windowID)
-            guard let setWindowListWorkspace = Self.api.setWindowListWorkspace else {
-                throw SpaceManagerError.missingPrivateSymbol("SLSSetWindowListWorkspace")
-            }
-            let workspaceError = setWindowListWorkspace(connection, &mutableWindowID, 1, Self.compatWorkspace)
-            _ = spaceSetCompatID(connection, targetSpaceID, 0)
-
-            guard workspaceError == .success else {
-                throw SpaceManagerError.windowWorkspaceAssignmentFailed(windowID, workspaceError)
-            }
-        } else {
-            log?("Using direct managed-space move path")
-            guard let moveWindowsToManagedSpace = Self.api.moveWindowsToManagedSpace else {
-                throw SpaceManagerError.missingPrivateSymbol("SLSMoveWindowsToManagedSpace")
-            }
-            moveWindowsToManagedSpace(connection, windows, targetSpaceID)
-        }
-    }
-
-    private func windowSpaceIDs(for windowID: CGWindowID) -> [SLSSpaceID] {
-        let windowIDs = [NSNumber(value: windowID)] as CFArray
-        guard let connection = Self.api.mainConnectionID?(),
-              let copySpacesForWindows = Self.api.copySpacesForWindows
-        else {
-            return []
-        }
-
-        let rawSpaceIDs = copySpacesForWindows(connection, Self.allSpacesMask, windowIDs) as NSArray
-
-        return rawSpaceIDs.compactMap { value in
-            (value as? NSNumber)?.uint64Value
-        }
     }
 
     private func displaySnapshots() -> [DisplaySnapshot] {
@@ -159,22 +56,6 @@ final class SpaceManager {
             let visibleDesktop = snapshot.visibleDesktopIndex(fallbackSpaceID: activeSpaceID()).map(String.init) ?? "?"
             return "display\(index + 1){current:\(snapshot.currentSpaceID.map(String.init) ?? "?"),visible:\(visibleDesktop),user:\(snapshot.userSpaces.map(\.id))}"
         }.joined(separator: " ")
-    }
-
-    private static func requiresCompatMovePath(processInfo: ProcessInfo = .processInfo) -> Bool {
-        let version = processInfo.operatingSystemVersion
-        if version.majorVersion > 14 {
-            return true
-        }
-
-        return version.majorVersion == 14 && version.minorVersion >= 5
-    }
-
-    private func slsConnection() throws -> SLSConnectionID {
-        guard let connection = Self.api.mainConnectionID?() else {
-            throw SpaceManagerError.missingPrivateSymbol("SLSMainConnectionID")
-        }
-        return connection
     }
 
     private func activeSpaceID() -> UInt64? {
@@ -242,35 +123,12 @@ final class SpaceManager {
         return CFUUIDCreateString(nil, uuid) as String
     }
 
-    private func resolveTargetSpaceID(
-        for windowID: CGWindowID,
-        targetIndex: Int,
-        currentSpaceIDs: [UInt64],
-        snapshots: [DisplaySnapshot]
-    ) throws -> UInt64 {
-        let sourceDisplay = try resolveSourceDisplay(currentSpaceIDs: currentSpaceIDs, snapshots: snapshots)
-
-        guard sourceDisplay.userSpaces.indices.contains(targetIndex - 1) else {
-            throw SpaceManagerError.targetSpaceMissing(targetIndex, sourceDisplay.userSpaces.count)
-        }
-
-        return sourceDisplay.userSpaces[targetIndex - 1].id
-    }
-
-    private func resolveSourceDisplay(currentSpaceIDs: [UInt64], snapshots: [DisplaySnapshot]) throws -> DisplaySnapshot {
-        guard let sourceDisplay = snapshots.first(where: { snapshot in
-            snapshot.userSpaces.contains { currentSpaceIDs.contains($0.id) }
-        }) else {
-            throw SpaceManagerError.unableToResolveDisplay
-        }
-
-        return sourceDisplay
-    }
-
     private static let api = SkyLightAPI()
 
 }
 
+// These values are derived from SkyLight's managed display-space snapshot and
+// normalized into the menu bar's left-to-right display ordering.
 struct VisibleDisplaySpace: Equatable {
     let displayNumber: Int
     let desktopIndex: Int?
@@ -331,60 +189,17 @@ private func managedSpaceID(from rawValue: Any?) -> UInt64? {
     return nil
 }
 
-enum SpaceManagerError: LocalizedError {
-    case windowHasNoSpace
-    case unableToResolveDisplay
-    case targetSpaceMissing(Int, Int)
-    case targetSpaceNotUserSpace(UInt64)
-    case sourceSpaceNotUserSpace(UInt64)
-    case compatSpaceAssignmentFailed(UInt64, CGError)
-    case windowWorkspaceAssignmentFailed(CGWindowID, CGError)
-    case moveVerificationFailed(CGWindowID, UInt64, [UInt64])
-    case missingPrivateSymbol(String)
-
-    var errorDescription: String? {
-        switch self {
-        case .windowHasNoSpace:
-            return "The focused window is not attached to a user desktop"
-        case .unableToResolveDisplay:
-            return "Unable to resolve the display for the focused window"
-        case let .targetSpaceMissing(target, available):
-            return "Desktop \(target) does not exist on this display; \(available) desktops are available"
-        case let .targetSpaceNotUserSpace(spaceID):
-            return "Target space \(spaceID) is not a user desktop"
-        case let .sourceSpaceNotUserSpace(spaceID):
-            return "Source space \(spaceID) is not a user desktop"
-        case let .compatSpaceAssignmentFailed(spaceID, error):
-            return "Failed to set compat workspace on space \(spaceID) (CGError \(error.rawValue))"
-        case let .windowWorkspaceAssignmentFailed(windowID, error):
-            return "Failed to assign workspace for window \(windowID) (CGError \(error.rawValue))"
-        case let .moveVerificationFailed(windowID, targetSpaceID, actualSpaces):
-            return "Window \(windowID) did not move to target space \(targetSpaceID); actual spaces: \(actualSpaces)"
-        case let .missingPrivateSymbol(symbol):
-            return "Private SkyLight symbol is unavailable: \(symbol)"
-        }
-    }
-}
-
+// SkyLight is a private framework. We keep its usage narrow here: read-only
+// space tracking for the menu bar, not window movement.
 private struct SkyLightAPI {
     typealias MainConnectionIDFn = @convention(c) () -> Int32
     typealias GetActiveSpaceFn = @convention(c) (Int32) -> UInt64
     typealias CopyManagedDisplaySpacesFn = @convention(c) (Int32) -> Unmanaged<CFArray>
-    typealias CopySpacesForWindowsFn = @convention(c) (Int32, Int32, CFArray) -> Unmanaged<CFArray>
-    typealias SpaceGetTypeFn = @convention(c) (Int32, UInt64) -> Int32
-    typealias MoveWindowsToManagedSpaceFn = @convention(c) (Int32, CFArray, UInt64) -> Void
-    typealias SpaceSetCompatIDFn = @convention(c) (Int32, UInt64, Int32) -> CGError
-    typealias SetWindowListWorkspaceFn = @convention(c) (Int32, UnsafeMutablePointer<UInt32>, Int32, Int32) -> CGError
 
     let handle: UnsafeMutableRawPointer?
     let mainConnectionID: (() -> Int32)?
     let getActiveSpace: ((Int32) -> UInt64)?
     let copyManagedDisplaySpaces: ((Int32) -> CFArray)?
-    let copySpacesForWindows: ((Int32, Int32, CFArray) -> CFArray)?
-    let spaceGetType: ((Int32, UInt64) -> Int32)?
-    let moveWindowsToManagedSpace: ((Int32, CFArray, UInt64) -> Void)?
-    let spaceSetCompatID: ((Int32, UInt64, Int32) -> CGError)?
-    let setWindowListWorkspace: ((Int32, UnsafeMutablePointer<UInt32>, Int32, Int32) -> CGError)?
 
     init() {
         let paths = [
@@ -412,15 +227,6 @@ private struct SkyLightAPI {
                 function(connection).takeRetainedValue()
             }
         }
-        copySpacesForWindows = Self.resolve(handle: resolvedHandle, symbol: "SLSCopySpacesForWindows", as: CopySpacesForWindowsFn.self).map { function in
-            { connection, selector, windows in
-                function(connection, selector, windows).takeRetainedValue()
-            }
-        }
-        spaceGetType = Self.resolve(handle: resolvedHandle, symbol: "SLSSpaceGetType", as: SpaceGetTypeFn.self)
-        moveWindowsToManagedSpace = Self.resolve(handle: resolvedHandle, symbol: "SLSMoveWindowsToManagedSpace", as: MoveWindowsToManagedSpaceFn.self)
-        spaceSetCompatID = Self.resolve(handle: resolvedHandle, symbol: "SLSSpaceSetCompatID", as: SpaceSetCompatIDFn.self)
-        setWindowListWorkspace = Self.resolve(handle: resolvedHandle, symbol: "SLSSetWindowListWorkspace", as: SetWindowListWorkspaceFn.self)
     }
 
     private static func resolve<T>(handle: UnsafeMutableRawPointer?, symbol: String, as type: T.Type) -> T? {
