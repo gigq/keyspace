@@ -10,6 +10,13 @@ APP_DIR="$BUILD_DIR/$APP_NAME.app"
 CONTENTS_DIR="$APP_DIR/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"
+ARCHS="${ARCHS:-$(uname -m)}"
+CONFIGURATION="${CONFIGURATION:-release}"
+MINIMUM_SYSTEM_VERSION="${MINIMUM_SYSTEM_VERSION:-14.0}"
+VERSION="${VERSION:-0.1.0}"
+BUILD_NUMBER="${BUILD_NUMBER:-1}"
+SIGNING_IDENTITY="${SIGNING_IDENTITY:--}"
+ENABLE_HARDENED_RUNTIME="${ENABLE_HARDENED_RUNTIME:-0}"
 
 cd "$ROOT_DIR"
 
@@ -19,20 +26,44 @@ if [[ -z "${DEVELOPER_DIR:-}" ]] && [[ "$(xcode-select -p 2>/dev/null || true)" 
   export DEVELOPER_DIR="/Applications/Xcode.app/Contents/Developer"
 fi
 
-swift build -c release --product "$EXECUTABLE_NAME"
-BIN_DIR="$(swift build -c release --show-bin-path)"
-EXECUTABLE_PATH="$BIN_DIR/$EXECUTABLE_NAME"
+build_slice() {
+  local arch="$1"
+  local scratch_path="$ROOT_DIR/.build/$arch"
+  local triple="${arch}-apple-macosx${MINIMUM_SYSTEM_VERSION}"
 
-if [[ ! -x "$EXECUTABLE_PATH" ]]; then
-  echo "Built executable not found at:"
-  echo "  $EXECUTABLE_PATH"
-  exit 1
-fi
+  rm -rf "$scratch_path"
+  swift build \
+    --triple "$triple" \
+    --scratch-path "$scratch_path" \
+    -c "$CONFIGURATION" \
+    --product "$EXECUTABLE_NAME" \
+    >/dev/null
+
+  find "$scratch_path" -type f -path "*/$CONFIGURATION/$EXECUTABLE_NAME" -perm -111 | head -n 1
+}
+
+declare -a executable_slices=()
+for arch in $ARCHS; do
+  executable_slices+=("$(build_slice "$arch")")
+done
+
+for executable_path in "${executable_slices[@]}"; do
+  if [[ ! -x "$executable_path" ]]; then
+    echo "Built executable not found at:"
+    echo "  $executable_path"
+    exit 1
+  fi
+done
 
 rm -rf "$APP_DIR"
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 
-cp "$EXECUTABLE_PATH" "$MACOS_DIR/$APP_NAME"
+if [[ "${#executable_slices[@]}" -eq 1 ]]; then
+  cp "${executable_slices[0]}" "$MACOS_DIR/$APP_NAME"
+else
+  lipo -create "${executable_slices[@]}" -output "$MACOS_DIR/$APP_NAME"
+fi
+
 chmod +x "$MACOS_DIR/$APP_NAME"
 
 ICON_SRC="$ROOT_DIR/Resources/AppIcon.icns"
@@ -61,11 +92,11 @@ cat > "$CONTENTS_DIR/Info.plist" <<PLIST
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
-  <string>0.1.0</string>
+  <string>$VERSION</string>
   <key>CFBundleVersion</key>
-  <string>1</string>
+  <string>$BUILD_NUMBER</string>
   <key>LSMinimumSystemVersion</key>
-  <string>14.0</string>
+  <string>$MINIMUM_SYSTEM_VERSION</string>
   <key>LSUIElement</key>
   <true/>
   <key>NSHighResolutionCapable</key>
@@ -76,7 +107,15 @@ PLIST
 
 printf 'APPL????' > "$CONTENTS_DIR/PkgInfo"
 
-codesign --force --sign - "$APP_DIR" >/dev/null 2>&1 || true
+codesign_args=(--force --deep --sign "$SIGNING_IDENTITY")
+if [[ "$SIGNING_IDENTITY" != "-" ]]; then
+  codesign_args+=(--timestamp)
+  if [[ "$ENABLE_HARDENED_RUNTIME" == "1" ]]; then
+    codesign_args+=(--options runtime)
+  fi
+fi
+
+codesign "${codesign_args[@]}" "$APP_DIR" >/dev/null 2>&1
 
 echo "Built app bundle at:"
 echo "  $APP_DIR"

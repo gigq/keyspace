@@ -1,0 +1,96 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-14
+
+    env:
+      VERSION: ${{ github.ref_name }}
+      BUILD_NUMBER: ${{ github.run_number }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Derive release version
+        run: echo "RELEASE_VERSION=${VERSION#v}" >> "$GITHUB_ENV"
+
+      - name: Import Developer ID certificate
+        if: ${{ secrets.APPLE_DEVELOPER_ID_APP_CERT_BASE64 != '' }}
+        env:
+          CERT_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_APP_CERT_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_APP_CERT_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.APPLE_BUILD_KEYCHAIN_PASSWORD }}
+        run: |
+          KEYCHAIN_PATH="$RUNNER_TEMP/keyspace-build.keychain-db"
+          CERT_PATH="$RUNNER_TEMP/developer-id.p12"
+
+          echo "$CERT_BASE64" | base64 --decode > "$CERT_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" -P "$CERT_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+      - name: Build universal app bundle
+        env:
+          ARCHS: arm64 x86_64
+          VERSION: ${{ env.RELEASE_VERSION }}
+          BUILD_NUMBER: ${{ env.BUILD_NUMBER }}
+          SIGNING_IDENTITY: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION || '-' }}
+          ENABLE_HARDENED_RUNTIME: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION != '' && '1' || '0' }}
+        run: ./scripts/build_app.sh
+
+      - name: Build DMG
+        env:
+          VERSION: ${{ env.RELEASE_VERSION }}
+          SIGNING_IDENTITY: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION || '-' }}
+        run: ./scripts/build_dmg.sh
+
+      - name: Notarize DMG
+        if: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION != '' && secrets.APPLE_ID != '' && secrets.APPLE_APP_SPECIFIC_PASSWORD != '' && secrets.APPLE_TEAM_ID != '' }}
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          DMG_PATH=".build/dist/Keyspace-${RELEASE_VERSION}-universal.dmg"
+          xcrun notarytool store-credentials "keyspace-notary" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID"
+          xcrun notarytool submit "$DMG_PATH" \
+            --keychain-profile "keyspace-notary" \
+            --wait
+          xcrun stapler staple "$DMG_PATH"
+
+      - name: Generate checksums
+        run: |
+          cd .build/dist
+          shasum -a 256 "Keyspace-${RELEASE_VERSION}-universal.dmg" > "Keyspace-${RELEASE_VERSION}-universal.dmg.sha256"
+
+      - name: Publish GitHub release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          DMG=".build/dist/Keyspace-${RELEASE_VERSION}-universal.dmg"
+          CHECKSUM=".build/dist/Keyspace-${RELEASE_VERSION}-universal.dmg.sha256"
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$DMG" "$CHECKSUM" --clobber
+          else
+            gh release create "$TAG" "$DMG" "$CHECKSUM" \
+              --title "Keyspace ${RELEASE_VERSION}" \
+              --generate-notes
+          fi
