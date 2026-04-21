@@ -183,13 +183,46 @@ final class AppController: NSObject {
     }
 
     private func updateStatusItem() {
-        let title = spaceManager.currentVisibleSpaceIndex().map(String.init) ?? "?"
+        let visibleSpaces = spaceManager.visibleDisplaySpaces()
+        let title = statusItemTitle(for: visibleSpaces)
         let attributes: [NSAttributedString.Key: Any] = [
             .font: NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .semibold),
         ]
 
         statusItem.button?.attributedTitle = NSAttributedString(string: title, attributes: attributes)
-        statusItem.button?.toolTip = title == "?" ? "Current desktop unavailable" : "Desktop \(title)"
+        statusItem.button?.toolTip = statusItemToolTip(for: visibleSpaces)
+    }
+
+    private func statusItemTitle(for visibleSpaces: [VisibleDisplaySpace]) -> String {
+        guard !visibleSpaces.isEmpty else {
+            return "?"
+        }
+
+        let desktopTitles = visibleSpaces.map { visibleSpace in
+            visibleSpace.desktopIndex.map(String.init) ?? "?"
+        }
+
+        return desktopTitles.count == 1 ? desktopTitles[0] : desktopTitles.joined(separator: "|")
+    }
+
+    private func statusItemToolTip(for visibleSpaces: [VisibleDisplaySpace]) -> String {
+        guard !visibleSpaces.isEmpty else {
+            return "Current desktop unavailable"
+        }
+
+        if visibleSpaces.count == 1 {
+            if let desktopIndex = visibleSpaces[0].desktopIndex {
+                return "Desktop \(desktopIndex)"
+            }
+            return "Current desktop unavailable"
+        }
+
+        return visibleSpaces.map { visibleSpace in
+            if let desktopIndex = visibleSpace.desktopIndex {
+                return "Display \(visibleSpace.displayNumber): Desktop \(desktopIndex)"
+            }
+            return "Display \(visibleSpace.displayNumber): unavailable"
+        }.joined(separator: "\n")
     }
 
     private func refreshMenuState() {

@@ -8,10 +8,12 @@ Current behavior:
 
 - loads bindings from `~/.config/keysmith/keysmith.conf`
 - stays in the menu bar
-- shows the current desktop number in the menu bar
+- shows the current desktop number for each display in the menu bar
 - registers global hotkeys
 - launches apps from config
 - moves the focused window to desktop `N`
+
+On multi-display setups, the menu bar label shows one desktop number per display, ordered left to right, for example `2|11`.
 
 ## How Window Moves Work
 
@@ -134,6 +136,8 @@ Build a standalone `.app` bundle from the Swift package:
 scripts/build_app.sh
 ```
 
+If your shell is pointed at older Apple Command Line Tools but `/Applications/Xcode.app` is installed, the build script automatically prefers Xcode's bundled Swift toolchain.
+
 That produces:
 
 ```text
@@ -157,7 +161,7 @@ The generated app bundle is a menu bar app with `LSUIElement` enabled, so it sta
 ## Caveats
 
 - `move-window-to-space` requires Accessibility permission because the app needs the focused window ID and posts synthetic input events.
-- Desktop tracking still uses private macOS space APIs for the menu bar number.
+- Desktop tracking still uses private macOS space APIs for the menu bar numbers.
 - Window moves assume a normal draggable title bar.
 - Window moves are currently tuned for same-display desktop switching.
 - This is a local power-user tool, not an App Store-style distribution target.

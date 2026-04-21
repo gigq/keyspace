@@ -13,6 +13,12 @@ RESOURCES_DIR="$CONTENTS_DIR/Resources"
 
 cd "$ROOT_DIR"
 
+# Prefer the full Xcode toolchain when the active developer directory points at
+# older Command Line Tools. This avoids tool-version mismatches for local builds.
+if [[ -z "${DEVELOPER_DIR:-}" ]] && [[ "$(xcode-select -p 2>/dev/null || true)" == "/Library/Developer/CommandLineTools" ]] && [[ -d "/Applications/Xcode.app/Contents/Developer" ]]; then
+  export DEVELOPER_DIR="/Applications/Xcode.app/Contents/Developer"
+fi
+
 swift build -c release --product "$EXECUTABLE_NAME"
 BIN_DIR="$(swift build -c release --show-bin-path)"
 EXECUTABLE_PATH="$BIN_DIR/$EXECUTABLE_NAME"

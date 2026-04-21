@@ -10,27 +10,17 @@ final class SpaceManager {
     private static let allSpacesMask: Int32 = 0x7
     private static let compatWorkspace = Int32(bitPattern: 0x79616265)
 
-    func currentVisibleSpaceIndex() -> Int? {
-        guard let mainConnectionID = Self.api.mainConnectionID,
-              let getActiveSpace = Self.api.getActiveSpace
-        else {
-            return nil
-        }
+    func visibleDisplaySpaces() -> [VisibleDisplaySpace] {
+        let activeSpaceID = activeSpaceID()
 
-        let activeSpaceID = getActiveSpace(mainConnectionID())
-
-        for display in displaySnapshots() {
-            if let index = display.userSpaces.firstIndex(where: { $0.id == activeSpaceID }) {
-                return index + 1
+        return orderedDisplaySnapshots(displaySnapshots())
+            .enumerated()
+            .map { offset, display in
+                VisibleDisplaySpace(
+                    displayNumber: offset + 1,
+                    desktopIndex: display.visibleDesktopIndex(fallbackSpaceID: activeSpaceID)
+                )
             }
-
-            if let currentSpaceID = display.currentSpaceID,
-               let index = display.userSpaces.firstIndex(where: { $0.id == currentSpaceID }) {
-                return index + 1
-            }
-        }
-
-        return nil
     }
 
     func moveWindow(windowID: CGWindowID, toUserSpaceIndex targetIndex: Int, log: ((String) -> Void)? = nil) throws {
@@ -142,7 +132,7 @@ final class SpaceManager {
 
         let rawDisplays = copyManagedDisplaySpaces(connection) as NSArray
 
-        return rawDisplays.compactMap { display -> DisplaySnapshot? in
+        return rawDisplays.enumerated().compactMap { offset, display -> DisplaySnapshot? in
             guard let dictionary = display as? [String: Any] else {
                 return nil
             }
@@ -155,13 +145,19 @@ final class SpaceManager {
                 return nil
             }
 
-            return DisplaySnapshot(currentSpaceID: currentSpaceID, userSpaces: userSpaces)
+            return DisplaySnapshot(
+                originalOrder: offset,
+                displayIdentifier: dictionary["Display Identifier"] as? String,
+                currentSpaceID: currentSpaceID,
+                userSpaces: userSpaces
+            )
         }
     }
 
     func debugSummary() -> String {
-        displaySnapshots().enumerated().map { index, snapshot in
-            "display\(index + 1){current:\(snapshot.currentSpaceID.map(String.init) ?? "?"),user:\(snapshot.userSpaces.map(\.id))}"
+        orderedDisplaySnapshots(displaySnapshots()).enumerated().map { index, snapshot in
+            let visibleDesktop = snapshot.visibleDesktopIndex(fallbackSpaceID: activeSpaceID()).map(String.init) ?? "?"
+            return "display\(index + 1){current:\(snapshot.currentSpaceID.map(String.init) ?? "?"),visible:\(visibleDesktop),user:\(snapshot.userSpaces.map(\.id))}"
         }.joined(separator: " ")
     }
 
@@ -179,6 +175,71 @@ final class SpaceManager {
             throw SpaceManagerError.missingPrivateSymbol("SLSMainConnectionID")
         }
         return connection
+    }
+
+    private func activeSpaceID() -> UInt64? {
+        guard let mainConnectionID = Self.api.mainConnectionID,
+              let getActiveSpace = Self.api.getActiveSpace
+        else {
+            return nil
+        }
+
+        return getActiveSpace(mainConnectionID())
+    }
+
+    private func orderedDisplaySnapshots(_ snapshots: [DisplaySnapshot]) -> [DisplaySnapshot] {
+        let framesByDisplayIdentifier = displayFramesByIdentifier()
+
+        return snapshots.sorted { lhs, rhs in
+            let lhsFrame = lhs.displayIdentifier.flatMap { framesByDisplayIdentifier[$0] }
+            let rhsFrame = rhs.displayIdentifier.flatMap { framesByDisplayIdentifier[$0] }
+
+            switch (lhsFrame, rhsFrame) {
+            case let (lhsFrame?, rhsFrame?):
+                if lhsFrame.minX != rhsFrame.minX {
+                    return lhsFrame.minX < rhsFrame.minX
+                }
+                if lhsFrame.minY != rhsFrame.minY {
+                    return lhsFrame.minY < rhsFrame.minY
+                }
+            case (.some, nil):
+                return true
+            case (nil, .some):
+                return false
+            case (nil, nil):
+                break
+            }
+
+            return lhs.originalOrder < rhs.originalOrder
+        }
+    }
+
+    private func displayFramesByIdentifier() -> [String: CGRect] {
+        NSScreen.screens.reduce(into: [:]) { result, screen in
+            guard
+                let screenNumber = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber,
+                let displayIdentifier = Self.displayIdentifier(for: CGDirectDisplayID(screenNumber.uint32Value))
+            else {
+                return
+            }
+
+            result[displayIdentifier] = screen.frame
+        }
+    }
+
+    private static func displayIdentifier(for displayID: CGDirectDisplayID) -> String? {
+        typealias DisplayUUIDFn = @convention(c) (CGDirectDisplayID) -> Unmanaged<CFUUID>?
+
+        guard let symbol = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "CGDisplayCreateUUIDFromDisplayID") else {
+            return nil
+        }
+
+        let function = unsafeBitCast(symbol, to: DisplayUUIDFn.self)
+        guard let uuid = function(displayID)?.takeRetainedValue() else {
+            return nil
+        }
+
+        return CFUUIDCreateString(nil, uuid) as String
     }
 
     private func resolveTargetSpaceID(
@@ -210,9 +271,30 @@ final class SpaceManager {
 
 }
 
+struct VisibleDisplaySpace: Equatable {
+    let displayNumber: Int
+    let desktopIndex: Int?
+}
+
 private struct DisplaySnapshot {
+    let originalOrder: Int
+    let displayIdentifier: String?
     let currentSpaceID: UInt64?
     let userSpaces: [ManagedSpace]
+
+    func visibleDesktopIndex(fallbackSpaceID: UInt64?) -> Int? {
+        if let currentSpaceID,
+           let index = userSpaces.firstIndex(where: { $0.id == currentSpaceID }) {
+            return index + 1
+        }
+
+        if let fallbackSpaceID,
+           let index = userSpaces.firstIndex(where: { $0.id == fallbackSpaceID }) {
+            return index + 1
+        }
+
+        return nil
+    }
 }
 
 private struct ManagedSpace {
