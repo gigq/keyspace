@@ -120,9 +120,6 @@ jobs:
           CHECKSUM=".build/dist/Keyspace-${RELEASE_VERSION}-universal.dmg.sha256"
 
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release edit "$TAG" \
-              --title "Keyspace ${RELEASE_VERSION}" \
-              --notes-file "$RELEASE_NOTES_FILE"
             gh release upload "$TAG" "$DMG" "$CHECKSUM" --clobber
           else
             gh release create "$TAG" "$DMG" "$CHECKSUM" \
