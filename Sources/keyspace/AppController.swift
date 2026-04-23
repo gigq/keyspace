@@ -19,6 +19,7 @@ final class AppController: NSObject {
     private let missionControlShortcutResolver = MissionControlShortcutResolver()
     private let windowDragSpaceMover = WindowDragSpaceMover()
     private let windowTilingManager = WindowTilingManager()
+    private let followFocusManager = FollowFocusManager()
     private let debugLogger = DebugLogger()
 
     private let menu = NSMenu()
@@ -66,6 +67,7 @@ final class AppController: NSObject {
         hotKeyManager.unregisterAll()
         mouseButtonManager.unregisterAll()
         scrollWheelManager.unregisterAll()
+        followFocusManager.stop()
         spaceSwitchUnlockTask?.cancel()
         statusItemCreationTask?.cancel()
         configurationWatcher.stop()
@@ -141,6 +143,7 @@ final class AppController: NSObject {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor in
+                self?.followFocusManager.noteSpaceDidChange()
                 self?.updateStatusItem()
             }
         }
@@ -188,9 +191,18 @@ final class AppController: NSObject {
                 hotKeyManager.unregisterAll()
                 mouseButtonManager.unregisterAll()
                 scrollWheelManager.unregisterAll()
+                followFocusManager.stop()
                 throw error
             }
             applyStatusItemCreationDelay(configuration.menuBarCreationDelaySeconds)
+            followFocusManager.apply(
+                settings: FollowFocusSettings(
+                    enabled: configuration.followFocusEnabled,
+                    delaySeconds: configuration.followFocusDelaySeconds
+                )
+            ) { [weak self] message in
+                self?.logEvent(message)
+            }
             refreshMenuState()
             updateStatusItem()
             logger.info("Loaded \(configuration.bindings.count) bindings from config")
@@ -198,6 +210,7 @@ final class AppController: NSObject {
         } catch {
             logger.error("Config reload failed: \(error.localizedDescription, privacy: .public)")
             applyStatusItemCreationDelay(0)
+            followFocusManager.stop()
             refreshMenuState()
             logEvent("Config reload failed: \(error.localizedDescription)")
         }

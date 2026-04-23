@@ -8,6 +8,8 @@ func parsesDefaultStyleBindings() throws {
     let configuration = try parser.parse(
         """
         menu-bar-creation-delay-seconds = 5
+        follow-focus-enabled = true
+        follow-focus-delay-seconds = 0.2
         bind = cmd+enter, launch, com.mitchellh.ghostty
         bind = cmd+1, switch-to-space, 1
         bind = shift+cmd+10, move-window-to-space, 10
@@ -19,6 +21,8 @@ func parsesDefaultStyleBindings() throws {
     )
 
     #expect(configuration.menuBarCreationDelaySeconds == 5)
+    #expect(configuration.followFocusEnabled == true)
+    #expect(configuration.followFocusDelaySeconds == 0.2)
     #expect(configuration.bindings.count == 7)
     #expect(configuration.bindings[0].action == .launch("com.mitchellh.ghostty"))
     #expect(configuration.bindings[1].action == .switchToSpace(1))
@@ -60,6 +64,19 @@ func rejectsInvalidMenuBarDelay() throws {
 
     #expect(throws: ConfigurationError.self) {
         try parser.parse("menu-bar-creation-delay-seconds = nope")
+    }
+}
+
+@Test
+func rejectsInvalidFollowFocusValues() throws {
+    let parser = ConfigurationParser()
+
+    #expect(throws: ConfigurationError.self) {
+        try parser.parse("follow-focus-enabled = maybe")
+    }
+
+    #expect(throws: ConfigurationError.self) {
+        try parser.parse("follow-focus-delay-seconds = nope")
     }
 }
 

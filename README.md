@@ -12,11 +12,14 @@ If you already think in terms of "workspace 1 on this monitor", "move the focuse
 
 Today, `keyspace` loads global bindings from a config file, launches apps, moves the focused window between numbered desktops, switches desktops, and can retile the focused display into a master-stack layout on demand.
 
+![Keyspace screenshot](docs/images/keyspace-screenshot.png)
+
 Current behavior:
 
 - loads bindings from `~/.config/keyspace/keyspace.conf`
 - stays in the menu bar
 - can delay menu bar insertion at startup to try to land farther left after login
+- can optionally follow focus by raising the hovered window after a short delay
 - shows the current desktop number for each display in the menu bar
 - registers global keyboard, mouse-button, and scroll bindings
 - launches apps from config
@@ -115,6 +118,18 @@ Space switching is still explicit. One trigger produces one desktop change.
 
 The app uses the Mission Control left/right shortcut currently configured in macOS, rather than assuming a fixed hardcoded key combination.
 
+## How Follow Focus Works
+
+`keyspace` can optionally follow focus by raising the window under the cursor after a short hover delay.
+
+This is intentionally a narrow version of the idea:
+
+- disabled by default
+- raises normal app windows under the cursor
+- uses Accessibility hit testing first
+- falls back to topmost on-screen window matching for some PWA-style cases
+- suppresses itself during space changes and while mouse buttons are down
+
 ## Prerequisites
 
 The current built-in move workflow assumes these are true:
@@ -139,6 +154,8 @@ The first launch creates this config automatically. It reflects the current defa
 
 ```ini
 # menu-bar-creation-delay-seconds = 5
+# follow-focus-enabled = true
+# follow-focus-delay-seconds = 0.15
 
 # Example app launch bindings:
 # bind = cmd+enter, launch, Terminal
@@ -182,6 +199,8 @@ One binding per line:
 
 ```ini
 menu-bar-creation-delay-seconds = number
+follow-focus-enabled = true|false
+follow-focus-delay-seconds = number
 bind = modifiers+key, action, argument
 bind = modifiers+mouse-N, action, argument
 bind = modifiers+scroll-left, action
@@ -202,6 +221,8 @@ Examples:
 
 ```ini
 menu-bar-creation-delay-seconds = 5
+follow-focus-enabled = true
+follow-focus-delay-seconds = 0.15
 bind = cmd+enter, launch, Terminal
 bind = cmd+shift+enter, shell, open -na Terminal
 bind = cmd+b, launch, Safari
@@ -233,6 +254,8 @@ The default config path is:
 Legacy `~/.config/keysmith/keysmith.conf` and `KEYSMITH_CONFIG` overrides are still honored if you already have an older setup.
 
 `menu-bar-creation-delay-seconds` is only relevant during startup. If you change it while Keyspace is already running, restart the app to test the new insertion delay.
+
+`follow-focus-enabled` and `follow-focus-delay-seconds` are applied when the config reloads, so you can tune the hover behavior without changing your bindings.
 
 The `shell` action runs its argument through `/bin/sh -lc`, which is useful for commands like:
 

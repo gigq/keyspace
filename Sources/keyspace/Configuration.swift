@@ -4,6 +4,8 @@ import Foundation
 
 struct KeyspaceConfiguration: Equatable {
     let menuBarCreationDelaySeconds: TimeInterval
+    let followFocusEnabled: Bool
+    let followFocusDelaySeconds: TimeInterval
     let bindings: [ConfiguredBinding]
 }
 
@@ -342,6 +344,8 @@ struct ConfigurationStore {
         #
         # Syntax:
         # menu-bar-creation-delay-seconds = number
+        # follow-focus-enabled = true|false
+        # follow-focus-delay-seconds = number
         # bind = modifiers+key, action, argument
         # bind = modifiers+mouse-N, action, argument
         # bind = modifiers+scroll-left, action
@@ -361,12 +365,17 @@ struct ConfigurationStore {
         # menu-bar-creation-delay-seconds delays creating the status item at startup.
         # This is a best-effort way to make Keyspace appear farther left in the
         # menu bar after login. It does not guarantee a fixed order.
+        # follow-focus-enabled turns on focus-follows-mouse style window raising.
+        # follow-focus-delay-seconds controls how long the cursor must remain over a
+        # window before Keyspace raises it.
         #
         # shift+cmd+10 maps to the physical 0 key.
         # mouse-1=left, mouse-2=right, mouse-3=middle, mouse-4+=extra buttons
 
         # Example startup behavior:
         # menu-bar-creation-delay-seconds = 5
+        # follow-focus-enabled = true
+        # follow-focus-delay-seconds = 0.15
         #
         # Example app launch bindings:
         # bind = cmd+enter, launch, Terminal
@@ -406,6 +415,8 @@ struct ConfigurationParser {
     func parse(_ rawConfig: String) throws -> KeyspaceConfiguration {
         let lines = rawConfig.components(separatedBy: .newlines)
         var menuBarCreationDelaySeconds: TimeInterval = 0
+        var followFocusEnabled = false
+        var followFocusDelaySeconds: TimeInterval = 0.15
         var bindings: [ConfiguredBinding] = []
 
         for (index, line) in lines.enumerated() {
@@ -420,6 +431,10 @@ struct ConfigurationParser {
                     switch directive {
                     case let .menuBarCreationDelaySeconds(delay):
                         menuBarCreationDelaySeconds = delay
+                    case let .followFocusEnabled(enabled):
+                        followFocusEnabled = enabled
+                    case let .followFocusDelaySeconds(delay):
+                        followFocusDelaySeconds = delay
                     }
                 } else {
                     bindings.append(try parseBinding(trimmedLine))
@@ -431,12 +446,16 @@ struct ConfigurationParser {
 
         return KeyspaceConfiguration(
             menuBarCreationDelaySeconds: menuBarCreationDelaySeconds,
+            followFocusEnabled: followFocusEnabled,
+            followFocusDelaySeconds: followFocusDelaySeconds,
             bindings: bindings
         )
     }
 
     private enum ParsedDirective {
         case menuBarCreationDelaySeconds(TimeInterval)
+        case followFocusEnabled(Bool)
+        case followFocusDelaySeconds(TimeInterval)
     }
 
     private func parseDirective(_ line: String) throws -> ParsedDirective? {
@@ -454,10 +473,31 @@ struct ConfigurationParser {
                 throw ConfigurationError.invalidDirectiveValue(directive, value)
             }
             return .menuBarCreationDelaySeconds(delay)
+        case "follow-focus-enabled":
+            guard let enabled = parseBoolean(value) else {
+                throw ConfigurationError.invalidDirectiveValue(directive, value)
+            }
+            return .followFocusEnabled(enabled)
+        case "follow-focus-delay-seconds":
+            guard let delay = TimeInterval(value), delay >= 0 else {
+                throw ConfigurationError.invalidDirectiveValue(directive, value)
+            }
+            return .followFocusDelaySeconds(delay)
         case "bind":
             return nil
         default:
             throw ConfigurationError.invalidDirective(directive)
+        }
+    }
+
+    private func parseBoolean(_ value: String) -> Bool? {
+        switch value.lowercased() {
+        case "true", "yes", "on", "1":
+            return true
+        case "false", "no", "off", "0":
+            return false
+        default:
+            return nil
         }
     }
 
