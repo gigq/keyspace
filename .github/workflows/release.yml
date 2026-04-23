@@ -26,6 +26,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Select Xcode
         uses: maxim-lobanov/setup-xcode@v1
@@ -34,6 +36,32 @@ jobs:
 
       - name: Derive release version
         run: echo "RELEASE_VERSION=${VERSION#v}" >> "$GITHUB_ENV"
+
+      - name: Generate release notes
+        run: |
+          NOTES_FILE="$RUNNER_TEMP/release-notes.md"
+          PREVIOUS_TAG="$(git tag --sort=-version:refname | grep -vx "${VERSION}" | head -n1 || true)"
+
+          {
+            echo "## Changes"
+            echo
+
+            if [ -n "$PREVIOUS_TAG" ]; then
+              git log --no-merges --format='- %s' "${PREVIOUS_TAG}..${VERSION}"
+            else
+              git log --no-merges --format='- %s'
+            fi
+
+            echo
+
+            if [ -n "$PREVIOUS_TAG" ]; then
+              echo "**Full Changelog**: https://github.com/${GITHUB_REPOSITORY}/compare/${PREVIOUS_TAG}...${VERSION}"
+            else
+              echo "Initial release."
+            fi
+          } > "$NOTES_FILE"
+
+          echo "RELEASE_NOTES_FILE=$NOTES_FILE" >> "$GITHUB_ENV"
 
       - name: Import Developer ID certificate
         if: ${{ env.APPLE_DEVELOPER_ID_APP_CERT_BASE64 != '' }}
@@ -92,9 +120,12 @@ jobs:
           CHECKSUM=".build/dist/Keyspace-${RELEASE_VERSION}-universal.dmg.sha256"
 
           if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" \
+              --title "Keyspace ${RELEASE_VERSION}" \
+              --notes-file "$RELEASE_NOTES_FILE"
             gh release upload "$TAG" "$DMG" "$CHECKSUM" --clobber
           else
             gh release create "$TAG" "$DMG" "$CHECKSUM" \
               --title "Keyspace ${RELEASE_VERSION}" \
-              --generate-notes
+              --notes-file "$RELEASE_NOTES_FILE"
           fi
