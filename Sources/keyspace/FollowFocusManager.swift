@@ -84,6 +84,11 @@ final class FollowFocusManager {
         }
 
         let point = currentMouseLocation()
+        if isPointInSystemUI(point) {
+            resetPendingWindow()
+            return
+        }
+
         guard let hoveredWindow = focusedWindowManager.windowContext(at: point) else {
             resetPendingWindow()
             lastRaisedWindowID = nil
@@ -169,6 +174,30 @@ final class FollowFocusManager {
         return event.location
     }
 
+    private func isPointInSystemUI(_ point: CGPoint) -> Bool {
+        guard let screen = NSScreen.screens.first(where: { $0.frame.contains(point) }) else {
+            return false
+        }
+
+        if !screen.visibleFrame.contains(point) {
+            return true
+        }
+
+        guard let topWindow = topWindow(at: point) else {
+            return false
+        }
+
+        if topWindow.layer != 0 {
+            return true
+        }
+
+        if topWindow.ownerName == "Dock" {
+            return true
+        }
+
+        return false
+    }
+
     private func isMouseButtonPressed() -> Bool {
         CGEventSource.buttonState(.combinedSessionState, button: .left)
             || CGEventSource.buttonState(.combinedSessionState, button: .right)
@@ -180,7 +209,36 @@ final class FollowFocusManager {
         hoverStartedAt = nil
     }
 
+    private func topWindow(at point: CGPoint) -> WindowInfo? {
+        guard
+            let windowList = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]
+        else {
+            return nil
+        }
+
+        return windowList.compactMap(WindowInfo.init).first(where: { $0.frame.contains(point) })
+    }
+
     private func runningApplication(for processID: pid_t) -> NSRunningApplication? {
         NSWorkspace.shared.runningApplications.first(where: { $0.processIdentifier == processID })
+    }
+}
+
+private struct WindowInfo {
+    let ownerName: String?
+    let layer: Int
+    let frame: CGRect
+
+    init?(dictionary: [String: Any]) {
+        guard
+            let bounds = dictionary[kCGWindowBounds as String] as? [String: Any],
+            let frame = CGRect(dictionaryRepresentation: bounds as CFDictionary)
+        else {
+            return nil
+        }
+
+        self.ownerName = dictionary[kCGWindowOwnerName as String] as? String
+        self.layer = (dictionary[kCGWindowLayer as String] as? NSNumber)?.intValue ?? 0
+        self.frame = frame
     }
 }
