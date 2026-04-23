@@ -21,10 +21,10 @@ final class AppController: NSObject {
     private let windowTilingManager = WindowTilingManager()
     private let debugLogger = DebugLogger()
 
-    private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let menu = NSMenu()
     private let spaceSwitchCooldownNanoseconds: UInt64 = 800_000_000
 
+    private var statusItem: NSStatusItem?
     private var configPathMenuItem = NSMenuItem()
     private var logPathMenuItem = NSMenuItem()
     private var lastEventMenuItem = NSMenuItem()
@@ -32,6 +32,7 @@ final class AppController: NSObject {
     private var activeSpaceObserver: NSObjectProtocol?
     private var spaceSwitchInFlight = false
     private var spaceSwitchUnlockTask: Task<Void, Never>?
+    private var statusItemCreationTask: Task<Void, Never>?
 
     private enum TriggerSource {
         case keyboard
@@ -66,7 +67,11 @@ final class AppController: NSObject {
         mouseButtonManager.unregisterAll()
         scrollWheelManager.unregisterAll()
         spaceSwitchUnlockTask?.cancel()
+        statusItemCreationTask?.cancel()
         configurationWatcher.stop()
+        if let statusItem {
+            NSStatusBar.system.removeStatusItem(statusItem)
+        }
     }
 
     private func buildMenu() {
@@ -109,7 +114,6 @@ final class AppController: NSObject {
         quitItem.target = self
         menu.addItem(quitItem)
 
-        statusItem.menu = menu
         refreshMenuState()
         logEvent("Menu initialized")
     }
@@ -186,12 +190,14 @@ final class AppController: NSObject {
                 scrollWheelManager.unregisterAll()
                 throw error
             }
+            applyStatusItemCreationDelay(configuration.menuBarCreationDelaySeconds)
             refreshMenuState()
             updateStatusItem()
             logger.info("Loaded \(configuration.bindings.count) bindings from config")
             logEvent("Loaded \(configuration.bindings.count) bindings from \(configurationStore.configURL.lastPathComponent)")
         } catch {
             logger.error("Config reload failed: \(error.localizedDescription, privacy: .public)")
+            applyStatusItemCreationDelay(0)
             refreshMenuState()
             logEvent("Config reload failed: \(error.localizedDescription)")
         }
@@ -226,7 +232,7 @@ final class AppController: NSObject {
         case let .switchToSpace(target):
             switchFocusedDisplay(toDesktop: target, source: source)
         case .tileCurrentDisplayMaster:
-            tileCurrentDisplayMaster()
+            tileCurrentDisplayMaster(source: source)
         case .switchSpaceLeft:
             switchSpaceLeft(source: source)
         case .switchSpaceRight:
@@ -330,7 +336,7 @@ final class AppController: NSObject {
         }
     }
 
-    private func tileCurrentDisplayMaster() {
+    private func tileCurrentDisplayMaster(source: TriggerSource) {
         logEvent("Preparing master-stack tiling for the focused display")
         guard ensureAccessibilityPermission(promptIfMissing: true) else {
             logger.error("Accessibility permission is required to tile windows")
@@ -340,7 +346,8 @@ final class AppController: NSObject {
         }
 
         do {
-            try windowTilingManager.tileCurrentDisplayWithFocusedWindowAsMaster { [weak self] message in
+            let preferredPoint = source == .mouseButton ? NSEvent.mouseLocation : nil
+            try windowTilingManager.tileCurrentDisplayWithFocusedWindowAsMaster(preferredPoint: preferredPoint) { [weak self] message in
                 self?.logEvent(message)
             }
             logEvent("Master-stack tiling completed")
@@ -422,15 +429,52 @@ final class AppController: NSObject {
         spaceSwitchInFlight = false
     }
 
+    private func applyStatusItemCreationDelay(_ delaySeconds: TimeInterval) {
+        guard statusItem == nil else {
+            return
+        }
+
+        statusItemCreationTask?.cancel()
+
+        if delaySeconds <= 0 {
+            installStatusItemIfNeeded()
+            return
+        }
+
+        let nanoseconds = UInt64(delaySeconds * 1_000_000_000)
+        statusItemCreationTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: nanoseconds)
+            self?.installStatusItemIfNeeded()
+        }
+    }
+
+    private func installStatusItemIfNeeded() {
+        guard statusItem == nil else {
+            return
+        }
+
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        item.menu = menu
+        statusItem = item
+        statusItemCreationTask = nil
+        refreshMenuState()
+        updateStatusItem()
+        logEvent("Status item inserted into the menu bar")
+    }
+
     private func updateStatusItem() {
+        guard let statusButton = statusItem?.button else {
+            return
+        }
+
         let visibleSpaces = spaceManager.visibleDisplaySpaces()
         let title = statusItemTitle(for: visibleSpaces)
         let attributes: [NSAttributedString.Key: Any] = [
             .font: NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .semibold),
         ]
 
-        statusItem.button?.attributedTitle = NSAttributedString(string: title, attributes: attributes)
-        statusItem.button?.toolTip = statusItemToolTip(for: visibleSpaces)
+        statusButton.attributedTitle = NSAttributedString(string: title, attributes: attributes)
+        statusButton.toolTip = statusItemToolTip(for: visibleSpaces)
     }
 
     private func statusItemTitle(for visibleSpaces: [VisibleDisplaySpace]) -> String {

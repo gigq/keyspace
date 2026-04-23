@@ -12,24 +12,34 @@ final class WindowTilingManager {
     private let minimumPaneWidth: CGFloat = 220
     private var fullScreenAttribute: CFString { "AXFullScreen" as CFString }
 
-    func tileCurrentDisplayWithFocusedWindowAsMaster(log: ((String) -> Void)? = nil) throws {
-        let focusedWindow = try focusedWindowManager.focusedWindowContext()
-        guard let screen = screenContaining(frame: focusedWindow.frame) else {
+    func tileCurrentDisplayWithFocusedWindowAsMaster(
+        preferredPoint: CGPoint? = nil,
+        log: ((String) -> Void)? = nil
+    ) throws {
+        let focusedWindow = try? focusedWindowManager.focusedWindowContext()
+        guard let screen = targetScreen(preferredPoint: preferredPoint, focusedWindow: focusedWindow) else {
             throw WindowTilingManagerError.unableToResolveFocusedDisplay
         }
 
         let managedWindows = managedWindows(
             on: screen,
-            focusedWindowID: focusedWindow.windowID
+            focusedWindowID: focusedWindow?.windowID
         )
 
         guard !managedWindows.isEmpty else {
             throw WindowTilingManagerError.noSupportedWindowsOnFocusedDisplay
         }
 
-        let orderedWindows = prioritizeFocusedWindow(
+        let masterWindowID = preferredMasterWindowID(
+            preferredPoint: preferredPoint,
+            focusedWindow: focusedWindow,
+            on: screen,
+            managedWindows: managedWindows
+        )
+
+        let orderedWindows = prioritizeMasterWindow(
             managedWindows,
-            focusedWindowID: focusedWindow.windowID
+            masterWindowID: masterWindowID
         )
         let screenLayoutFrame = layoutFrame(for: screen)
         let targetFrames = masterStackFrames(
@@ -51,7 +61,7 @@ final class WindowTilingManager {
 
     private func managedWindows(
         on screen: NSScreen,
-        focusedWindowID: CGWindowID
+        focusedWindowID: CGWindowID?
     ) -> [ManagedWindow] {
         let screenFrame = screen.frame
         let snapshots = onScreenWindowSnapshots()
@@ -75,7 +85,8 @@ final class WindowTilingManager {
             managedWindows.append(managedWindow)
         }
 
-        if !seenWindowIDs.contains(focusedWindowID),
+        if let focusedWindowID,
+           !seenWindowIDs.contains(focusedWindowID),
            let focusedSnapshot = snapshots.first(where: { $0.windowID == focusedWindowID }),
            let focusedManagedWindow = resolveManagedWindow(from: focusedSnapshot) {
             managedWindows.append(focusedManagedWindow)
@@ -84,15 +95,15 @@ final class WindowTilingManager {
         return managedWindows
     }
 
-    private func prioritizeFocusedWindow(
+    private func prioritizeMasterWindow(
         _ managedWindows: [ManagedWindow],
-        focusedWindowID: CGWindowID
+        masterWindowID: CGWindowID?
     ) -> [ManagedWindow] {
         managedWindows.sorted { lhs, rhs in
-            if lhs.windowID == focusedWindowID {
+            if let masterWindowID, lhs.windowID == masterWindowID {
                 return true
             }
-            if rhs.windowID == focusedWindowID {
+            if let masterWindowID, rhs.windowID == masterWindowID {
                 return false
             }
             if lhs.frame.minX != rhs.frame.minX {
@@ -103,6 +114,41 @@ final class WindowTilingManager {
             }
             return lhs.windowID < rhs.windowID
         }
+    }
+
+    private func targetScreen(
+        preferredPoint: CGPoint?,
+        focusedWindow: FocusedWindowContext?
+    ) -> NSScreen? {
+        if let preferredPoint, let screen = screenContaining(point: preferredPoint) {
+            return screen
+        }
+
+        if let focusedWindow, let screen = screenContaining(frame: focusedWindow.frame) {
+            return screen
+        }
+
+        return nil
+    }
+
+    private func preferredMasterWindowID(
+        preferredPoint: CGPoint?,
+        focusedWindow: FocusedWindowContext?,
+        on screen: NSScreen,
+        managedWindows: [ManagedWindow]
+    ) -> CGWindowID? {
+        if let focusedWindow,
+           prefers(screen.frame, for: focusedWindow.frame),
+           managedWindows.contains(where: { $0.windowID == focusedWindow.windowID }) {
+            return focusedWindow.windowID
+        }
+
+        if let preferredPoint,
+           let hoveredWindow = managedWindows.first(where: { $0.frame.contains(preferredPoint) }) {
+            return hoveredWindow.windowID
+        }
+
+        return managedWindows.first?.windowID
     }
 
     private func masterStackFrames(in frame: CGRect, count: Int) -> [CGRect] {
@@ -280,6 +326,10 @@ final class WindowTilingManager {
         NSScreen.screens.max { lhs, rhs in
             overlapArea(between: lhs.frame, and: frame) < overlapArea(between: rhs.frame, and: frame)
         }
+    }
+
+    private func screenContaining(point: CGPoint) -> NSScreen? {
+        NSScreen.screens.first(where: { $0.frame.contains(point) })
     }
 
     private func prefers(_ screenFrame: CGRect, for windowFrame: CGRect) -> Bool {

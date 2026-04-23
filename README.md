@@ -16,6 +16,7 @@ Current behavior:
 
 - loads bindings from `~/.config/keyspace/keyspace.conf`
 - stays in the menu bar
+- can delay menu bar insertion at startup to try to land farther left after login
 - shows the current desktop number for each display in the menu bar
 - registers global keyboard, mouse-button, and scroll bindings
 - launches apps from config
@@ -25,6 +26,18 @@ Current behavior:
 
 On multi-display setups, the menu bar label shows one desktop number per display, ordered left to right, for example `2|11`.
 Window moves always target the display the focused window is already on, and `keyspace` resolves the matching Mission Control shortcut from macOS.
+
+## Menu Bar Placement
+
+macOS does not provide a supported API to pin a third-party status item to a fixed position in the menu bar.
+
+`keyspace` supports a best-effort startup delay setting:
+
+- `menu-bar-creation-delay-seconds = 5`
+
+If Keyspace waits a few seconds before creating its status item, it often lands farther left than menu bar apps that inserted themselves earlier during login.
+
+This is useful if you want Keyspace near the left edge of your third-party menu bar items, but it is not a guarantee. Other apps can still insert themselves later, and macOS still controls the final ordering.
 
 ## What This Is
 
@@ -125,6 +138,8 @@ You can change Mission Control desktop shortcuts in:
 The first launch creates this config automatically. It reflects the current default assumption that one set of bindings is enough, because `keyspace` resolves the actual Mission Control desktop shortcut for the focused display:
 
 ```ini
+# menu-bar-creation-delay-seconds = 5
+
 # Example app launch bindings:
 # bind = cmd+enter, launch, Terminal
 # bind = cmd+shift+enter, shell, open -na Terminal
@@ -166,6 +181,7 @@ For these bindings to work, macOS Mission Control desktop shortcuts should be co
 One binding per line:
 
 ```ini
+menu-bar-creation-delay-seconds = number
 bind = modifiers+key, action, argument
 bind = modifiers+mouse-N, action, argument
 bind = modifiers+scroll-left, action
@@ -185,6 +201,7 @@ Supported actions:
 Examples:
 
 ```ini
+menu-bar-creation-delay-seconds = 5
 bind = cmd+enter, launch, Terminal
 bind = cmd+shift+enter, shell, open -na Terminal
 bind = cmd+b, launch, Safari
@@ -214,6 +231,8 @@ The default config path is:
 ```
 
 Legacy `~/.config/keysmith/keysmith.conf` and `KEYSMITH_CONFIG` overrides are still honored if you already have an older setup.
+
+`menu-bar-creation-delay-seconds` is only relevant during startup. If you change it while Keyspace is already running, restart the app to test the new insertion delay.
 
 The `shell` action runs its argument through `/bin/sh -lc`, which is useful for commands like:
 
@@ -283,6 +302,7 @@ The generated app bundle is a menu bar app with `LSUIElement` enabled, so it sta
 - `switch-to-space` uses that same focused-display resolution logic, but switches desktops without dragging a window.
 - `switch-space-left` and `switch-space-right` use the Mission Control left/right shortcut configured in macOS.
 - scroll-based space switching intentionally uses a cooldown so one wheel gesture does not skip across multiple desktops.
+- menu bar insertion delay is only a best-effort ordering trick at login, not a fixed menu bar priority.
 - `tile-current-display-master` is intentionally manual. It does not automatically tile or retile windows when apps open, close, or change focus.
 - The tiling action only manages the focused display and skips some window types that are risky to resize continuously.
 - Desktop tracking still uses private macOS space APIs for the menu bar numbers.

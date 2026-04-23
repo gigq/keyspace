@@ -7,6 +7,7 @@ func parsesDefaultStyleBindings() throws {
     let parser = ConfigurationParser()
     let configuration = try parser.parse(
         """
+        menu-bar-creation-delay-seconds = 5
         bind = cmd+enter, launch, com.mitchellh.ghostty
         bind = cmd+1, switch-to-space, 1
         bind = shift+cmd+10, move-window-to-space, 10
@@ -17,6 +18,7 @@ func parsesDefaultStyleBindings() throws {
         """
     )
 
+    #expect(configuration.menuBarCreationDelaySeconds == 5)
     #expect(configuration.bindings.count == 7)
     #expect(configuration.bindings[0].action == .launch("com.mitchellh.ghostty"))
     #expect(configuration.bindings[1].action == .switchToSpace(1))
@@ -49,6 +51,15 @@ func parsesDefaultStyleBindings() throws {
         #expect(scrollTrigger.direction == .right)
     } else {
         Issue.record("Expected a scroll trigger for the scroll-right binding")
+    }
+}
+
+@Test
+func rejectsInvalidMenuBarDelay() throws {
+    let parser = ConfigurationParser()
+
+    #expect(throws: ConfigurationError.self) {
+        try parser.parse("menu-bar-creation-delay-seconds = nope")
     }
 }
 

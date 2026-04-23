@@ -3,6 +3,7 @@ import Carbon
 import Foundation
 
 struct KeyspaceConfiguration: Equatable {
+    let menuBarCreationDelaySeconds: TimeInterval
     let bindings: [ConfiguredBinding]
 }
 
@@ -340,6 +341,7 @@ struct ConfigurationStore {
         # Keyspace config
         #
         # Syntax:
+        # menu-bar-creation-delay-seconds = number
         # bind = modifiers+key, action, argument
         # bind = modifiers+mouse-N, action, argument
         # bind = modifiers+scroll-left, action
@@ -356,9 +358,16 @@ struct ConfigurationStore {
         # switch-space-right              -> posts the macOS "move right a space" shortcut
         #
         # Note:
+        # menu-bar-creation-delay-seconds delays creating the status item at startup.
+        # This is a best-effort way to make Keyspace appear farther left in the
+        # menu bar after login. It does not guarantee a fixed order.
+        #
         # shift+cmd+10 maps to the physical 0 key.
         # mouse-1=left, mouse-2=right, mouse-3=middle, mouse-4+=extra buttons
 
+        # Example startup behavior:
+        # menu-bar-creation-delay-seconds = 5
+        #
         # Example app launch bindings:
         # bind = cmd+enter, launch, Terminal
         # bind = cmd+shift+enter, shell, open -na Terminal
@@ -396,6 +405,7 @@ struct ConfigurationStore {
 struct ConfigurationParser {
     func parse(_ rawConfig: String) throws -> KeyspaceConfiguration {
         let lines = rawConfig.components(separatedBy: .newlines)
+        var menuBarCreationDelaySeconds: TimeInterval = 0
         var bindings: [ConfiguredBinding] = []
 
         for (index, line) in lines.enumerated() {
@@ -406,13 +416,49 @@ struct ConfigurationParser {
             }
 
             do {
-                bindings.append(try parseBinding(trimmedLine))
+                if let directive = try parseDirective(trimmedLine) {
+                    switch directive {
+                    case let .menuBarCreationDelaySeconds(delay):
+                        menuBarCreationDelaySeconds = delay
+                    }
+                } else {
+                    bindings.append(try parseBinding(trimmedLine))
+                }
             } catch {
                 throw ConfigurationError.line(index + 1, error.localizedDescription)
             }
         }
 
-        return KeyspaceConfiguration(bindings: bindings)
+        return KeyspaceConfiguration(
+            menuBarCreationDelaySeconds: menuBarCreationDelaySeconds,
+            bindings: bindings
+        )
+    }
+
+    private enum ParsedDirective {
+        case menuBarCreationDelaySeconds(TimeInterval)
+    }
+
+    private func parseDirective(_ line: String) throws -> ParsedDirective? {
+        let assignment = line.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: true)
+        guard assignment.count == 2 else {
+            throw ConfigurationError.invalidLine(line)
+        }
+
+        let directive = assignment[0].trimmingCharacters(in: .whitespacesAndNewlines)
+        let value = assignment[1].trimmingCharacters(in: .whitespacesAndNewlines)
+
+        switch directive {
+        case "menu-bar-creation-delay-seconds":
+            guard let delay = TimeInterval(value), delay >= 0 else {
+                throw ConfigurationError.invalidDirectiveValue(directive, value)
+            }
+            return .menuBarCreationDelaySeconds(delay)
+        case "bind":
+            return nil
+        default:
+            throw ConfigurationError.invalidDirective(directive)
+        }
     }
 
     private func parseBinding(_ line: String) throws -> ConfiguredBinding {
@@ -487,6 +533,7 @@ struct ConfigurationParser {
 enum ConfigurationError: LocalizedError, Equatable {
     case invalidLine(String)
     case invalidDirective(String)
+    case invalidDirectiveValue(String, String)
     case invalidTrigger(String)
     case invalidKeyCombo(String)
     case invalidModifier(String, String)
@@ -501,6 +548,8 @@ enum ConfigurationError: LocalizedError, Equatable {
             return "Invalid config line: \(line)"
         case let .invalidDirective(directive):
             return "Unsupported directive: \(directive)"
+        case let .invalidDirectiveValue(directive, value):
+            return "Invalid value '\(value)' for directive '\(directive)'"
         case let .invalidTrigger(rawValue):
             return "Unsupported trigger in '\(rawValue)'"
         case let .invalidKeyCombo(rawValue):
